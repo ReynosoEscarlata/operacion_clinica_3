@@ -10,6 +10,40 @@ jobs:
   lint-and-test:
     runs-on: ubuntu-latest
 
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: clinic
+          POSTGRES_PASSWORD: clinic
+          POSTGRES_DB: clinic_scheduler
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U clinic"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgresql://clinic:clinic@localhost:5432/clinic_scheduler?schema=public
+      REDIS_URL: redis://localhost:6379
+      STRIPE_SECRET_KEY: sk_test_dummy
+      STRIPE_WEBHOOK_SECRET: whsec_dummy
+      RESEND_API_KEY: re_dummy
+      RESEND_FROM_EMAIL: no-reply@clinica.example.com
+      ADMIN_API_KEY: ci-admin-key
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -28,6 +62,9 @@ jobs:
 
       - name: Typecheck
         run: npm run typecheck
+
+      - name: Apply migrations
+        run: npx prisma migrate deploy
 
       - name: Test
         run: npm run test
