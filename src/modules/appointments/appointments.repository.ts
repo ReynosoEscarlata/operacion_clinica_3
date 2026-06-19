@@ -29,6 +29,7 @@ export interface AppointmentRepository {
   createPending: (data: CreateAppointmentData) => Promise<Appointment>;
   findById: (id: string) => Promise<AppointmentWithEvents | null>;
   findStatusById: (id: string) => Promise<AppointmentStatus | null>;
+  findByPaymentIntentId: (stripePaymentIntentId: string) => Promise<Appointment | null>;
   list: (filters: ListAppointmentsFilters) => Promise<Appointment[]>;
   deleteHard: (id: string) => Promise<void>;
   addEvent: (appointmentId: string, type: EventType, payload: Prisma.InputJsonObject) => Promise<void>;
@@ -103,6 +104,10 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
       select: { status: true },
     });
     return appointment?.status ?? null;
+  }
+
+  async findByPaymentIntentId(stripePaymentIntentId: string): Promise<Appointment | null> {
+    return this.prisma.appointment.findUnique({ where: { stripePaymentIntentId } });
   }
 
   async list(filters: ListAppointmentsFilters): Promise<Appointment[]> {
