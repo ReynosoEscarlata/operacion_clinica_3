@@ -2,7 +2,6 @@ import type { FastifyError, FastifyReply, FastifyRequest } from 'fastify';
 
 import { Sentry } from '../config/sentry.js';
 import { AppError } from '../lib/app-error.js';
-import { logger } from '../lib/logger.js';
 
 export const errorHandler = (
   error: FastifyError | Error,
@@ -13,8 +12,8 @@ export const errorHandler = (
 
   if (error instanceof AppError) {
     if (!error.isOperational) {
-      logger.error({ err: error, requestId }, 'Error no operacional');
-      Sentry.captureException(error, { extra: { requestId } });
+      request.log.error({ err: error }, 'Error no operacional');
+      Sentry.captureException(error, { tags: { requestId } });
     }
 
     const statusCode = error.isOperational ? error.statusCode : 500;
@@ -25,8 +24,8 @@ export const errorHandler = (
     return;
   }
 
-  logger.error({ err: error, requestId }, 'Error no controlado');
-  Sentry.captureException(error, { extra: { requestId } });
+  request.log.error({ err: error }, 'Error no controlado');
+  Sentry.captureException(error, { tags: { requestId } });
 
   reply.status(500).send({
     error: { code: 'INTERNAL_ERROR', message: 'Error interno del servidor', requestId },
