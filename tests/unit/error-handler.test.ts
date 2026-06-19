@@ -1,3 +1,4 @@
+import { Type } from '@sinclair/typebox';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -22,6 +23,12 @@ const buildTestApp = (): FastifyInstance => {
   app.get('/non-operational-app-error', async () => {
     throw new AppError(500, 'BUG', 'Algo salió mal', false);
   });
+
+  app.post(
+    '/schema-validated',
+    { schema: { body: Type.Object({ email: Type.String({ format: 'email' }) }) } },
+    async () => ({ ok: true }),
+  );
 
   return app;
 };
@@ -77,5 +84,21 @@ describe('errorHandler', () => {
     expect(body.error.code).toBe('INTERNAL_ERROR');
     expect(body.error.message).toBe('Error interno del servidor');
     expect(Sentry.captureException).toHaveBeenCalledTimes(1);
+  });
+
+  it('responde 400 con código VALIDATION_ERROR cuando el body no cumple el schema, sin reportar a Sentry', async () => {
+    app = buildTestApp();
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/schema-validated',
+      payload: { email: 'no-es-un-email' },
+    });
+    const body = response.json();
+
+    expect(response.statusCode).toBe(400);
+    expect(body.error.code).toBe('VALIDATION_ERROR');
+    expect(body.error.requestId).toBeDefined();
+    expect(Sentry.captureException).not.toHaveBeenCalled();
   });
 });
