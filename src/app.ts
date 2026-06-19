@@ -6,10 +6,14 @@ import { redis as defaultRedis } from './config/redis.js';
 import { checkDatabase, checkRedis } from './lib/health-check.js';
 import { errorHandler } from './middleware/error-handler.js';
 import { registerRequestId } from './middleware/request-id.js';
+import { registerDoctorRoutes, type DoctorRoutesDeps } from './modules/doctors/index.js';
+import { registerPatientRoutes, type PatientRoutesDeps } from './modules/patients/index.js';
 
 export interface BuildAppDeps {
   prisma?: Parameters<typeof checkDatabase>[0];
   redis?: Parameters<typeof checkRedis>[0];
+  patients?: PatientRoutesDeps;
+  doctors?: DoctorRoutesDeps;
 }
 
 export const buildApp = (deps: BuildAppDeps = {}): FastifyInstance => {
@@ -21,6 +25,9 @@ export const buildApp = (deps: BuildAppDeps = {}): FastifyInstance => {
   app.register(cors);
   registerRequestId(app);
   app.setErrorHandler(errorHandler);
+
+  registerPatientRoutes(app, deps.patients);
+  registerDoctorRoutes(app, deps.doctors);
 
   app.get('/health', async (request, reply) => {
     const [database, redisStatus] = await Promise.all([

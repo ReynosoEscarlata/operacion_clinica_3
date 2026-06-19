@@ -3,6 +3,12 @@ import type { FastifyError, FastifyReply, FastifyRequest } from 'fastify';
 import { Sentry } from '../config/sentry.js';
 import { AppError } from '../lib/app-error.js';
 
+// Los errores de validación de schema (Typebox/JSON Schema vía ajv) son
+// errores esperados de input del cliente, no bugs: deben responder 400 sin
+// pasar por Sentry, igual que un AppError operacional.
+const isSchemaValidationError = (error: FastifyError | Error): boolean =>
+  'code' in error && error.code === 'FST_ERR_VALIDATION';
+
 export const errorHandler = (
   error: FastifyError | Error,
   request: FastifyRequest,
@@ -21,6 +27,13 @@ export const errorHandler = (
     const message = error.isOperational ? error.message : 'Error interno del servidor';
 
     reply.status(statusCode).send({ error: { code, message, requestId } });
+    return;
+  }
+
+  if (isSchemaValidationError(error)) {
+    reply.status(400).send({
+      error: { code: 'VALIDATION_ERROR', message: error.message, requestId },
+    });
     return;
   }
 
