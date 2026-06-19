@@ -14,6 +14,7 @@ const unusedRepository: DoctorRepository = {
   create: fail,
   findById: fail,
   exists: fail,
+  findBasicById: fail,
   findAll: fail,
   replaceAvailability: fail,
   findAvailabilityForDay: fail,

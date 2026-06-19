@@ -45,6 +45,20 @@ const assertNotInThePast = ({ year, month, day }: ParsedDate): void => {
   }
 };
 
+// Precio por defecto cuando no se especifica consultationPriceCents al crear el
+// doctor. Sirve como base por especialidad; cada doctor puede tener su propio
+// precio explícito independientemente de su especialidad.
+const DEFAULT_CONSULTATION_PRICE_CENTS = 50_000;
+
+const DEFAULT_PRICE_CENTS_BY_SPECIALTY: Record<string, number> = {
+  Cardiología: 80_000,
+  Dermatología: 60_000,
+  Pediatría: 50_000,
+};
+
+const resolveConsultationPrice = (specialty: string, explicitPriceCents?: number): number =>
+  explicitPriceCents ?? DEFAULT_PRICE_CENTS_BY_SPECIALTY[specialty] ?? DEFAULT_CONSULTATION_PRICE_CENTS;
+
 export class DoctorService {
   constructor(
     private readonly repository: DoctorRepository,
@@ -52,8 +66,9 @@ export class DoctorService {
   ) {}
 
   async create(dto: CreateDoctorDto): Promise<Doctor> {
-    const doctor = await this.repository.create(dto);
-    this.logger.info({ doctorId: doctor.id }, 'Doctor creado');
+    const consultationPriceCents = resolveConsultationPrice(dto.specialty, dto.consultationPriceCents);
+    const doctor = await this.repository.create({ ...dto, consultationPriceCents });
+    this.logger.info({ doctorId: doctor.id, consultationPriceCents }, 'Doctor creado');
     return doctor;
   }
 

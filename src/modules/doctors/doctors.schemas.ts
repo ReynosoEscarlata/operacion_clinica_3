@@ -6,6 +6,7 @@ export const CreateDoctorBody = Type.Object({
   name: Type.String({ minLength: 1 }),
   email: Type.String({ format: 'email' }),
   specialty: Type.String({ minLength: 1 }),
+  consultationPriceCents: Type.Optional(Type.Integer({ minimum: 1 })),
 });
 export type CreateDoctorDto = Static<typeof CreateDoctorBody>;
 
