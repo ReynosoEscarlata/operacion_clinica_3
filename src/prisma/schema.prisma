@@ -43,12 +43,13 @@ model Patient {
 }
 
 model Doctor {
-  id        String   @id @default(uuid()) @db.Uuid
-  name      String
-  email     String
-  specialty String
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id                     String   @id @default(uuid()) @db.Uuid
+  name                   String
+  email                  String
+  specialty              String
+  consultationPriceCents Int      @default(50000)
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
 
   availabilities Availability[]
   appointments   Appointment[]
@@ -72,6 +73,7 @@ model Appointment {
   doctorId               String            @db.Uuid
   dateTime               DateTime
   durationMinutes        Int               @default(30)
+  amountCents            Int               @default(0)
   status                 AppointmentStatus @default(PENDING)
   cancellationReason     String?
   stripePaymentIntentId  String?           @unique
@@ -80,11 +82,12 @@ model Appointment {
   remindedAt             DateTime?
   completedAt            DateTime?
   cancelledAt            DateTime?
+  noShowAt               DateTime?
   createdAt              DateTime          @default(now())
   updatedAt              DateTime          @updatedAt
 
-  patient Patient           @relation(fields: [patientId], references: [id], onDelete: Restrict)
-  doctor  Doctor            @relation(fields: [doctorId], references: [id], onDelete: Restrict)
+  patient Patient            @relation(fields: [patientId], references: [id], onDelete: Restrict)
+  doctor  Doctor             @relation(fields: [doctorId], references: [id], onDelete: Restrict)
   events  AppointmentEvent[]
 
   @@index([status])

@@ -4,6 +4,9 @@ import { prisma } from './config/prisma.js';
 import { redis } from './config/redis.js';
 import { initSentry, registerProcessErrorHandlers } from './config/sentry.js';
 import { logger } from './lib/logger.js';
+import { buildStateMachine } from './modules/appointments/state-machine.js';
+import { closeQueues } from './queues/queues.js';
+import { buildExpirationWorker } from './queues/workers/expiration.worker.js';
 
 const start = async (): Promise<void> => {
   initSentry();
@@ -11,10 +14,25 @@ const start = async (): Promise<void> => {
 
   const app = buildApp();
 
+  const stateMachine = buildStateMachine(prisma, logger);
+  const expirationWorker = buildExpirationWorker({
+    findStatusById: async (appointmentId) => {
+      const appointment = await prisma.appointment.findUnique({
+        where: { id: appointmentId },
+        select: { status: true },
+      });
+      return appointment?.status ?? null;
+    },
+    stateMachine,
+    logger,
+  });
+
   const shutdown = async (signal: string): Promise<void> => {
     logger.info({ signal }, 'Iniciando apagado del servidor');
 
     await app.close();
+    await expirationWorker.close();
+    await closeQueues();
     await prisma.$disconnect();
     redis.disconnect();
 

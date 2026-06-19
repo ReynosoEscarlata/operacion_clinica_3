@@ -4,7 +4,10 @@ export interface CreateDoctorData {
   name: string;
   email: string;
   specialty: string;
+  consultationPriceCents: number;
 }
+
+export type DoctorBasic = Pick<Doctor, 'id' | 'consultationPriceCents'>;
 
 export interface AvailabilityBlockData {
   dayOfWeek: number;
@@ -18,6 +21,7 @@ export interface DoctorRepository {
   create: (data: CreateDoctorData) => Promise<Doctor>;
   findById: (id: string) => Promise<DoctorWithAvailability | null>;
   exists: (id: string) => Promise<boolean>;
+  findBasicById: (id: string) => Promise<DoctorBasic | null>;
   findAll: () => Promise<Doctor[]>;
   replaceAvailability: (doctorId: string, blocks: AvailabilityBlockData[]) => Promise<Availability[]>;
   findAvailabilityForDay: (doctorId: string, dayOfWeek: number) => Promise<Availability[]>;
@@ -45,6 +49,13 @@ export class PrismaDoctorRepository implements DoctorRepository {
   async exists(id: string): Promise<boolean> {
     const doctor = await this.prisma.doctor.findUnique({ where: { id }, select: { id: true } });
     return doctor !== null;
+  }
+
+  async findBasicById(id: string): Promise<DoctorBasic | null> {
+    return this.prisma.doctor.findUnique({
+      where: { id },
+      select: { id: true, consultationPriceCents: true },
+    });
   }
 
   async findAll(): Promise<Doctor[]> {

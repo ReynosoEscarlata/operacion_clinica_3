@@ -14,9 +14,9 @@ export interface Slot {
   available: boolean;
 }
 
-const SLOT_MINUTES = 30;
+export const SLOT_MINUTES = 30;
 
-const parseTimeToMinutes = (time: string): number => {
+export const parseTimeToMinutes = (time: string): number => {
   const [hours, minutes] = time.split(':').map(Number);
   return (hours ?? 0) * 60 + (minutes ?? 0);
 };
