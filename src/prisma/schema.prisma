@@ -6,3 +6,115 @@ datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
 }
+
+enum AppointmentStatus {
+  PENDING
+  CONFIRMED
+  PAID
+  REMINDED
+  COMPLETED
+  CANCELLED
+  NO_SHOW
+}
+
+enum EventType {
+  CREATED
+  STATUS_CHANGED
+  PAYMENT_RECEIVED
+  PAYMENT_FAILED
+  EMAIL_SENT
+  EMAIL_FAILED
+  WEBHOOK_RECEIVED
+  REMINDER_SENT
+  CANCELLED
+  RESCHEDULED
+}
+
+model Patient {
+  id               String   @id @default(uuid()) @db.Uuid
+  email            String   @unique
+  name             String
+  phone            String
+  stripeCustomerId String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  appointments Appointment[]
+}
+
+model Doctor {
+  id        String   @id @default(uuid()) @db.Uuid
+  name      String
+  email     String
+  specialty String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  availabilities Availability[]
+  appointments   Appointment[]
+}
+
+model Availability {
+  id        String @id @default(uuid()) @db.Uuid
+  doctorId  String @db.Uuid
+  dayOfWeek Int
+  startTime String
+  endTime   String
+
+  doctor Doctor @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+
+  @@index([doctorId])
+}
+
+model Appointment {
+  id                     String            @id @default(uuid()) @db.Uuid
+  patientId              String            @db.Uuid
+  doctorId               String            @db.Uuid
+  dateTime               DateTime
+  durationMinutes        Int               @default(30)
+  status                 AppointmentStatus @default(PENDING)
+  cancellationReason     String?
+  stripePaymentIntentId  String?           @unique
+  confirmedAt            DateTime?
+  paidAt                 DateTime?
+  remindedAt             DateTime?
+  completedAt            DateTime?
+  cancelledAt            DateTime?
+  createdAt              DateTime          @default(now())
+  updatedAt              DateTime          @updatedAt
+
+  patient Patient           @relation(fields: [patientId], references: [id], onDelete: Restrict)
+  doctor  Doctor            @relation(fields: [doctorId], references: [id], onDelete: Restrict)
+  events  AppointmentEvent[]
+
+  @@index([status])
+  @@index([dateTime])
+}
+
+model AppointmentEvent {
+  id            String      @id @default(uuid()) @db.Uuid
+  appointmentId String      @db.Uuid
+  type          EventType
+  payload       Json
+  createdAt     DateTime    @default(now())
+
+  appointment Appointment @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+
+  @@index([appointmentId])
+}
+
+model IdempotencyRecord {
+  id        String   @id @default(uuid()) @db.Uuid
+  key       String   @unique
+  response  Json
+  createdAt DateTime @default(now())
+}
+
+model WebhookEvent {
+  id            String    @id @default(uuid()) @db.Uuid
+  stripeEventId String    @unique
+  type          String
+  payload       Json
+  processedAt   DateTime?
+  createdAt     DateTime  @default(now())
+}
