@@ -5,10 +5,10 @@ import { env } from '../../config/env.js';
 import type { Logger } from '../../lib/logger.js';
 
 export interface EmailService {
-  sendConfirmationEmail: (appointment: Appointment, patient: Patient) => Promise<void>;
-  sendReminderEmail: (appointment: Appointment, patient: Patient) => Promise<void>;
-  sendCancellationEmail: (appointment: Appointment, patient: Patient) => Promise<void>;
-  sendPaymentFailedEmail: (appointment: Appointment, patient: Patient) => Promise<void>;
+  sendConfirmationEmail: (appointment: Appointment, patient: Pick<Patient, 'name' | 'email'>) => Promise<void>;
+  sendReminderEmail: (appointment: Appointment, patient: Pick<Patient, 'name' | 'email'>) => Promise<void>;
+  sendCancellationEmail: (appointment: Appointment, patient: Pick<Patient, 'name' | 'email'>) => Promise<void>;
+  sendPaymentFailedEmail: (appointment: Appointment, patient: Pick<Patient, 'name' | 'email'>) => Promise<void>;
 }
 
 const CLINIC_NAME = 'Clínica Scheduler';
@@ -76,6 +76,7 @@ const reminderTemplate = (appointmentId: string, patientName: string, dateTime: 
         <p>Hola ${patientName},</p>
         <p><strong>Recordatorio:</strong> Tu cita está programada para mañana.</p>
         <p>
+          <strong>ID de cita:</strong> ${appointmentId.substring(0, 8)}<br>
           <strong>Fecha y hora:</strong> ${dateTime}<br>
           <strong>Estado:</strong> <span class="status-badge">RECORDATORIO</span>
         </p>
@@ -172,7 +173,7 @@ export class ResendEmailService implements EmailService {
     this.resend = new Resend(env.RESEND_API_KEY);
   }
 
-  async sendConfirmationEmail(appointment: Appointment, patient: Patient): Promise<void> {
+  async sendConfirmationEmail(appointment: Appointment, patient: Pick<Patient, 'name' | 'email'>): Promise<void> {
     const dateTime = appointment.dateTime.toLocaleString('es-MX');
 
     if (env.NODE_ENV === 'development') {
@@ -204,7 +205,7 @@ export class ResendEmailService implements EmailService {
     );
   }
 
-  async sendReminderEmail(appointment: Appointment, patient: Patient): Promise<void> {
+  async sendReminderEmail(appointment: Appointment, patient: Pick<Patient, 'name' | 'email'>): Promise<void> {
     const dateTime = appointment.dateTime.toLocaleString('es-MX');
 
     if (env.NODE_ENV === 'development') {
@@ -236,7 +237,7 @@ export class ResendEmailService implements EmailService {
     );
   }
 
-  async sendCancellationEmail(appointment: Appointment, patient: Patient): Promise<void> {
+  async sendCancellationEmail(appointment: Appointment, patient: Pick<Patient, 'name' | 'email'>): Promise<void> {
     // Cálculo del refund basado en SPEC.md: >=24h antes → completo (100%), <24h → 50%
     const hoursUntil = (appointment.dateTime.getTime() - Date.now()) / (1000 * 60 * 60);
     const refundPercentage = hoursUntil >= 24 ? 100 : 50;
@@ -273,7 +274,7 @@ export class ResendEmailService implements EmailService {
     );
   }
 
-  async sendPaymentFailedEmail(appointment: Appointment, patient: Patient): Promise<void> {
+  async sendPaymentFailedEmail(appointment: Appointment, patient: Pick<Patient, 'name' | 'email'>): Promise<void> {
     if (env.NODE_ENV === 'development') {
       this.logger.info(
         {

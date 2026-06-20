@@ -1,4 +1,6 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';}
+import { randomUUID } from 'node:crypto';
+
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { prisma } from '../../src/config/prisma.js';
 import { redis } from '../../src/config/redis.js';

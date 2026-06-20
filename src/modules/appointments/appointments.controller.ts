@@ -8,7 +8,7 @@ import type {
 } from './appointments.schemas.js';
 import type { AppointmentService } from './appointments.service.js';
 
-const ADMIN_API_KEY_HEADER = 'x-admin-api-key';
+const ADMIN_API_KEY_HEADER = 'x-admin-key';
 
 export class AppointmentController {
   constructor(

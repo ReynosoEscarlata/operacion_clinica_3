@@ -368,7 +368,7 @@ describe('Appointments (integración con DB real, Stripe mockeado)', () => {
     const response = await app.inject({
       method: 'PATCH',
       url: `/api/appointments/${appointment.id}/complete`,
-      headers: { 'x-admin-api-key': process.env.ADMIN_API_KEY ?? '' },
+      headers: { 'x-admin-key': process.env.ADMIN_API_KEY ?? '' },
     });
 
     expect(response.statusCode).toBe(200);
@@ -391,7 +391,7 @@ describe('Appointments (integración con DB real, Stripe mockeado)', () => {
     const response = await app.inject({
       method: 'PATCH',
       url: `/api/appointments/${appointment.id}/no-show`,
-      headers: { 'x-admin-api-key': process.env.ADMIN_API_KEY ?? '' },
+      headers: { 'x-admin-key': process.env.ADMIN_API_KEY ?? '' },
     });
 
     expect(response.statusCode).toBe(200);
