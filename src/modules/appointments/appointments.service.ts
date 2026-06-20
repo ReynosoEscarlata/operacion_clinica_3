@@ -20,6 +20,7 @@ export interface StripeAppointmentsClient {
       currency: string;
       customer?: string;
       metadata: Record<string, string>;
+      automatic_payment_methods?: { enabled: boolean };
     }) => Promise<{ id: string; client_secret: string | null }>;
     cancel: (paymentIntentId: string) => Promise<unknown>;
   };
@@ -82,6 +83,10 @@ export class AppointmentService {
         currency: 'mxn',
         ...(patient.stripeCustomerId ? { customer: patient.stripeCustomerId } : {}),
         metadata: { appointmentId: appointment.id },
+        // Necesario para que Stripe Elements (PaymentElement) en el frontend
+        // pueda renderizar los métodos de pago sin depender de la
+        // configuración por defecto de la cuenta de Stripe.
+        automatic_payment_methods: { enabled: true },
       });
     } catch (error) {
       await this.compensateFailedCreation(appointment.id, error);

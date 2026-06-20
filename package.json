@@ -18,7 +18,9 @@
     "typecheck": "tsc --noEmit",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
-    "prisma:seed": "tsx src/prisma/seed.ts"
+    "prisma:seed": "tsx src/prisma/seed.ts",
+    "prisma:seed:demo": "tsx src/prisma/seed-demo-appointments.ts",
+    "prisma:seed:demo:clean": "tsx src/prisma/seed-demo-appointments-clean.ts"
   },
   "prisma": {
     "schema": "src/prisma/schema.prisma",

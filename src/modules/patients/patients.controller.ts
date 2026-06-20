@@ -2,6 +2,7 @@ import type { FastifyReply, FastifyRequest } from 'fastify';
 
 import type {
   CreatePatientDto,
+  FindPatientByEmailQueryDto,
   ListPatientsQueryDto,
   PatientIdParamsDto,
   UpdatePatientDto,
@@ -24,6 +25,14 @@ export class PatientController {
     reply: FastifyReply,
   ): Promise<void> => {
     const patient = await this.service.getById(request.params.id);
+    reply.send(patient);
+  };
+
+  findByEmail = async (
+    request: FastifyRequest<{ Querystring: FindPatientByEmailQueryDto }>,
+    reply: FastifyReply,
+  ): Promise<void> => {
+    const patient = await this.service.getByEmail(request.query.email);
     reply.send(patient);
   };
 

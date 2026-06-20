@@ -112,7 +112,7 @@ export const AppointmentsListPage = (): JSX.Element => {
           type="button"
           onClick={(event) => {
             event.stopPropagation();
-            navigate(`/appointments/${row.id}`);
+            navigate(`/admin/appointments/${row.id}`);
           }}
           className="text-sm font-medium text-blue-500 hover:text-blue-700"
         >
@@ -198,7 +198,7 @@ export const AppointmentsListPage = (): JSX.Element => {
           columns={columns}
           rows={items}
           rowKey={(row) => row.id}
-          onRowClick={(row) => navigate(`/appointments/${row.id}`)}
+          onRowClick={(row) => navigate(`/admin/appointments/${row.id}`)}
           emptyMessage="No hay citas para estos filtros"
         />
       )}

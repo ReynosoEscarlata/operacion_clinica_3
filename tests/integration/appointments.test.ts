@@ -114,6 +114,7 @@ describe('Appointments (integración con DB real, Stripe mockeado)', () => {
       currency: 'mxn',
       customer: 'cus_test_123',
       metadata: { appointmentId: body.appointment.id },
+      automatic_payment_methods: { enabled: true },
     });
 
     createdAppointmentIds.push(body.appointment.id);

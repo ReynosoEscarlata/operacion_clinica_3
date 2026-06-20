@@ -47,7 +47,7 @@ export const AppointmentDetailPage = (): JSX.Element => {
       .catch((error: unknown) => {
         const message = error instanceof ApiError ? error.message : 'No se pudo cargar la cita';
         showToast(message, 'error');
-        if (error instanceof ApiError && error.status === 404) navigate('/appointments');
+        if (error instanceof ApiError && error.status === 404) navigate('/admin/appointments');
       })
       .finally(() => setIsLoading(false));
   };

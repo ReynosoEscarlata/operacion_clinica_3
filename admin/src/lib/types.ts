@@ -140,3 +140,16 @@ export interface DeadLetterListResult {
   data: DeadLetterJob[];
   count: number;
 }
+
+// --- Tipos del flujo público (registro + reserva) ---
+
+export interface Slot {
+  startTime: string;
+  endTime: string;
+  available: boolean;
+}
+
+export interface CreateAppointmentResult {
+  appointment: AppointmentListItem;
+  clientSecret: string | null;
+}
