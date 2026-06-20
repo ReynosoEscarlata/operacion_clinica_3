@@ -3,6 +3,7 @@ import { Worker } from 'bullmq';
 
 import { getRedisConnectionOptions } from '../../config/redis.js';
 import type { Logger } from '../../lib/logger.js';
+import { requestContextStorage } from '../../lib/request-context.js';
 import type { AppointmentRepository } from '../../modules/appointments/appointments.repository.js';
 import type { EmailService } from '../../modules/notifications/email.service.js';
 import type { EmailJobData } from '../jobs/email.job.js';
@@ -63,15 +64,17 @@ export const buildEmailWorker = (deps: EmailWorkerDeps): Worker<EmailJobData> =>
         ...(job.data.requestId ? { requestId: job.data.requestId } : {}),
       });
 
-      try {
-        await processEmailJob(job.data, { ...deps, logger: jobLogger });
-      } catch (error) {
-        jobLogger.error(
-          { err: error, appointmentId: job.data.appointmentId, emailType: job.data.type },
-          'Error al procesar email job',
-        );
-        throw error; // Re-lanzar para que BullMQ maneje el retry
-      }
+      await requestContextStorage.run({ requestId: job.data.requestId ?? String(job.id) }, async () => {
+        try {
+          await processEmailJob(job.data, { ...deps, logger: jobLogger });
+        } catch (error) {
+          jobLogger.error(
+            { err: error, appointmentId: job.data.appointmentId, emailType: job.data.type },
+            'Error al procesar email job',
+          );
+          throw error; // Re-lanzar para que BullMQ maneje el retry
+        }
+      });
     },
     { connection: getRedisConnectionOptions() },
   );

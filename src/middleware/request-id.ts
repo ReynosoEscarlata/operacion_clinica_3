@@ -4,6 +4,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 
 import { REQUEST_ID_HEADER } from '../lib/constants.js';
 import { logger } from '../lib/logger.js';
+import { requestContextStorage } from '../lib/request-context.js';
 
 declare module 'fastify' {
   interface FastifyRequest {
@@ -19,5 +20,10 @@ export const registerRequestId = (app: FastifyInstance): void => {
     request.requestId = requestId;
     request.log = logger.child({ requestId });
     reply.header(REQUEST_ID_HEADER, requestId);
+
+    // Habilita el mixin de pino (ver lib/logger.ts) para que cualquier
+    // logger.* invocado durante esta request -aunque use el logger global,
+    // no request.log- incluya requestId sin tener que pasarlo manualmente.
+    requestContextStorage.enterWith({ requestId });
   });
 };

@@ -4,6 +4,7 @@ import { Worker } from 'bullmq';
 
 import { getRedisConnectionOptions } from '../../config/redis.js';
 import type { Logger } from '../../lib/logger.js';
+import { requestContextStorage } from '../../lib/request-context.js';
 import type { AppointmentStateMachine } from '../../modules/appointments/state-machine.js';
 import type { ExpirationJobData } from '../jobs/expiration.job.js';
 import { APPOINTMENT_EXPIRATION_QUEUE } from '../queues.js';
@@ -60,7 +61,9 @@ export const buildExpirationWorker = (deps: ExpirationWorkerDeps): Worker<Expira
         ...(job.data.requestId ? { requestId: job.data.requestId } : {}),
       });
 
-      await processExpirationJob(job.data, { ...deps, logger: jobLogger });
+      await requestContextStorage.run({ requestId: job.data.requestId ?? String(job.id) }, () =>
+        processExpirationJob(job.data, { ...deps, logger: jobLogger }),
+      );
     },
     { connection: getRedisConnectionOptions() },
   );
