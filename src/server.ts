@@ -5,16 +5,41 @@ import { redis } from './config/redis.js';
 import { initSentry, registerProcessErrorHandlers } from './config/sentry.js';
 import { logger } from './lib/logger.js';
 import { buildStateMachine } from './modules/appointments/state-machine.js';
+import { buildAppointmentRepository } from './modules/appointments/appointments.repository.js';
+import { buildEmailService } from './modules/notifications/email.service.js';
+import { buildDeadLetterService } from './modules/admin/dead-letter.service.js';
 import { closeQueues } from './queues/queues.js';
 import { buildExpirationWorker } from './queues/workers/expiration.worker.js';
+import { buildEmailWorker } from './queues/workers/email.worker.js';
+import { buildReminderWorker } from './queues/workers/reminder.worker.js';
+import { buildNoShowWorker } from './queues/workers/noshow.worker.js';
+import { scheduleNoShowJob } from './queues/jobs/noshow.job.js';
 
 const start = async (): Promise<void> => {
   initSentry();
   registerProcessErrorHandlers();
 
-  const app = buildApp();
-
   const stateMachine = buildStateMachine(prisma, logger);
+  const appointmentRepository = buildAppointmentRepository(prisma);
+  const emailService = buildEmailService(logger);
+  const deadLetterService = buildDeadLetterService(appointmentRepository, logger);
+
+  const app = buildApp({
+    admin: { deadLetterService },
+  });
+
+  // Construir un objeto de repositorio de pacientes para los workers
+  const patientRepository = {
+    findById: async (id: string) => {
+      const patient = await prisma.patient.findUnique({
+        where: { id },
+        select: { id: true, email: true, name: true },
+      });
+      return patient;
+    },
+  };
+
+  // Construir los workers
   const expirationWorker = buildExpirationWorker({
     findStatusById: async (appointmentId) => {
       const appointment = await prisma.appointment.findUnique({
@@ -27,11 +52,38 @@ const start = async (): Promise<void> => {
     logger,
   });
 
+  const emailWorker = buildEmailWorker({
+    appointmentRepository,
+    patientRepository,
+    emailService,
+    logger,
+  });
+
+  const reminderWorker = buildReminderWorker({
+    appointmentRepository,
+    patientRepository,
+    emailService,
+    stateMachine,
+    logger,
+  });
+
+  const noShowWorker = buildNoShowWorker({
+    appointmentRepository,
+    stateMachine,
+    logger,
+  });
+
+  // Programar el job de noshow
+  await scheduleNoShowJob();
+
   const shutdown = async (signal: string): Promise<void> => {
     logger.info({ signal }, 'Iniciando apagado del servidor');
 
     await app.close();
     await expirationWorker.close();
+    await emailWorker.close();
+    await reminderWorker.close();
+    await noShowWorker.close();
     await closeQueues();
     await prisma.$disconnect();
     redis.disconnect();
