@@ -7,7 +7,7 @@ export const requireAdminAuth = async (
   request: FastifyRequest,
   _reply: FastifyReply,
 ): Promise<void> => {
-  const apiKey = request.headers['x-admin-api-key'];
+  const apiKey = request.headers['x-admin-key'];
 
   if (apiKey !== env.ADMIN_API_KEY) {
     throw new AppError(401, 'UNAUTHORIZED', 'Credenciales de admin inválidas');

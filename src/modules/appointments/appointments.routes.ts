@@ -16,7 +16,11 @@ import {
   CreateAppointmentBody,
   ListAppointmentsQuery,
 } from './appointments.schemas.js';
-import { buildAppointmentService, type StripeAppointmentsClient } from './appointments.service.js';
+import {
+  buildAppointmentService,
+  type AppointmentService,
+  type StripeAppointmentsClient,
+} from './appointments.service.js';
 import { buildStateMachine, type AppointmentStateMachine } from './state-machine.js';
 
 export interface AppointmentRoutesDeps {
@@ -28,10 +32,9 @@ export interface AppointmentRoutesDeps {
   enqueueExpiration?: (appointmentId: string, requestId?: string) => Promise<void>;
 }
 
-export const registerAppointmentRoutes = (
-  app: FastifyInstance,
-  deps: AppointmentRoutesDeps = {},
-): void => {
+// Reusado por el módulo admin para las acciones de cancelar/completar/no-show
+// (evita duplicar el wiring de dependencias del AppointmentService).
+export const buildDefaultAppointmentService = (deps: AppointmentRoutesDeps = {}): AppointmentService => {
   const repository = deps.repository ?? buildAppointmentRepository(defaultPrisma);
   const patientRepository = deps.patientRepository ?? buildPatientRepository(defaultPrisma);
   const doctorRepository = deps.doctorRepository ?? buildDoctorRepository(defaultPrisma);
@@ -39,7 +42,7 @@ export const registerAppointmentRoutes = (
   const stripeClient = deps.stripeClient ?? defaultStripe;
   const enqueueExpiration = deps.enqueueExpiration ?? enqueueAppointmentExpiration;
 
-  const service = buildAppointmentService({
+  return buildAppointmentService({
     repository,
     patientRepository,
     doctorRepository,
@@ -48,6 +51,13 @@ export const registerAppointmentRoutes = (
     enqueueExpiration,
     logger: defaultLogger,
   });
+};
+
+export const registerAppointmentRoutes = (
+  app: FastifyInstance,
+  deps: AppointmentRoutesDeps = {},
+): void => {
+  const service = buildDefaultAppointmentService(deps);
   const controller = buildAppointmentController(service, env.ADMIN_API_KEY);
 
   app.post('/api/appointments', { schema: { body: CreateAppointmentBody } }, controller.create);

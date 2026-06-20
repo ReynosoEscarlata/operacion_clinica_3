@@ -7,7 +7,7 @@ export interface DeadLetterControllerDeps {
 }
 
 export const buildDeadLetterController = (deps: DeadLetterControllerDeps) => ({
-  async getFailedJobs(request: FastifyRequest, reply: FastifyReply): Promise<void> {
+  async getFailedJobs(_request: FastifyRequest, reply: FastifyReply): Promise<void> {
     const jobs = await deps.deadLetterService.getFailedJobs();
 
     reply.send({

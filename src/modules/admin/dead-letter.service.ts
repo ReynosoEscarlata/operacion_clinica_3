@@ -1,9 +1,9 @@
-import type { Logger } from '../lib/logger.js';
-import type { AppointmentRepository } from '../modules/appointments/appointments.repository.js';
+import type { Logger } from '../../lib/logger.js';
+import type { AppointmentRepository } from '../appointments/appointments.repository.js';
 import {
   emailNotificationsQueue,
   appointmentRemindersQueue,
-} from '../queues/queues.js';
+} from '../../queues/queues.js';
 
 export interface DeadLetterJob {
   id: string;
@@ -22,7 +22,7 @@ export interface DeadLetterService {
 }
 
 export const buildDeadLetterService = (
-  appointmentRepository: AppointmentRepository,
+  _appointmentRepository: AppointmentRepository,
   logger: Logger,
 ): DeadLetterService => {
   const queues = [emailNotificationsQueue, appointmentRemindersQueue];

@@ -63,7 +63,8 @@ describe('Email Worker', () => {
   });
 
   it('procesa email de confirmación sin error', async () => {
-    const appointment = await prisma.appointment.findUnique({ where: { id: appointmentId } });
+    const appointmentRepository = buildAppointmentRepository(prisma);
+    const appointment = await appointmentRepository.findById(appointmentId);
     const patient = await prisma.patient.findUnique({ where: { id: patientId } });
 
     if (!appointment || !patient) {
@@ -77,8 +78,6 @@ describe('Email Worker', () => {
       appointmentId,
     };
 
-    const appointmentRepository = buildAppointmentRepository(prisma);
-
     await processEmailJob(jobData, {
       appointmentRepository,
       patientRepository: {
@@ -91,7 +90,7 @@ describe('Email Worker', () => {
       logger,
     });
 
-    expect(sendSpy).toHaveBeenCalledWith(appointment, patient);
+    expect(sendSpy).toHaveBeenCalledWith(appointment, { id: patient.id, email: patient.email, name: patient.name });
 
     // Verificar que se registró el evento
     const event = await prisma.appointmentEvent.findFirst({
