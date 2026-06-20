@@ -3,6 +3,7 @@ import { Worker } from 'bullmq';
 
 import { getRedisConnectionOptions } from '../../config/redis.js';
 import type { Logger } from '../../lib/logger.js';
+import { requestContextStorage } from '../../lib/request-context.js';
 import type { AppointmentRepository } from '../../modules/appointments/appointments.repository.js';
 import type { AppointmentStateMachine } from '../../modules/appointments/state-machine.js';
 import { APPOINTMENT_NOSHOW_QUEUE } from '../queues.js';
@@ -78,18 +79,21 @@ export const buildNoShowWorker = (deps: NoShowWorkerDeps): Worker<NoShowJobData>
       const jobLogger = deps.logger.child({
         queue: APPOINTMENT_NOSHOW_QUEUE,
         jobId: job.id,
+        requestId: String(job.id),
       });
 
-      try {
-        await processNoShowJob(job.data, { ...deps, logger: jobLogger });
-      } catch (error) {
-        jobLogger.error(
-          { err: error },
-          'Error no capturado en job de no-show',
-        );
-        // NO re-lanzar: este job es crítico y siempre debe completarse sin error
-        // para evitar que el cron falle
-      }
+      await requestContextStorage.run({ requestId: String(job.id) }, async () => {
+        try {
+          await processNoShowJob(job.data, { ...deps, logger: jobLogger });
+        } catch (error) {
+          jobLogger.error(
+            { err: error },
+            'Error no capturado en job de no-show',
+          );
+          // NO re-lanzar: este job es crítico y siempre debe completarse sin error
+          // para evitar que el cron falle
+        }
+      });
     },
     { connection: getRedisConnectionOptions() },
   );
