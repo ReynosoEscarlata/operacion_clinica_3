@@ -7,6 +7,7 @@ import { buildPatientController } from './patients.controller.js';
 import { buildPatientRepository, type PatientRepository } from './patients.repository.js';
 import {
   CreatePatientBody,
+  FindPatientByEmailQuery,
   ListPatientsQuery,
   PatientIdParams,
   UpdatePatientBody,
@@ -25,6 +26,12 @@ export const registerPatientRoutes = (app: FastifyInstance, deps: PatientRoutesD
   const controller = buildPatientController(service);
 
   app.post('/api/patients', { schema: { body: CreatePatientBody } }, controller.create);
+
+  app.get(
+    '/api/patients/by-email',
+    { schema: { querystring: FindPatientByEmailQuery } },
+    controller.findByEmail,
+  );
 
   app.get('/api/patients/:id', { schema: { params: PatientIdParams } }, controller.getById);
 

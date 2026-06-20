@@ -17,6 +17,7 @@ Documentación de diseño en [SPEC.md](./SPEC.md) y plan de fases en
 - Pino + Sentry
 - Vitest + Supertest
 - ESLint + Prettier
+- Panel admin: React + Vite + Tailwind CSS (carpeta [admin/](./admin))
 
 ## Requisitos
 
@@ -71,6 +72,22 @@ Documentación de diseño en [SPEC.md](./SPEC.md) y plan de fases en
 | `make migrate` | Aplica migraciones de Prisma              |
 | `make seed`    | Pobla la base de datos con datos de prueba|
 
+## Panel administrativo (frontend)
+
+El panel admin vive en [admin/](./admin), como un proyecto Vite separado (su propio
+`package.json`, sin compartir tooling con el backend).
+
+```bash
+cd admin
+npm install
+cp .env.example .env   # VITE_API_BASE_URL, por defecto http://localhost:3000
+npm run dev            # http://localhost:5173
+```
+
+Requiere el backend corriendo (`make dev`) y la `ADMIN_API_KEY` configurada en el `.env` del
+backend — esa misma key se ingresa al entrar al panel (se guarda solo en memoria, no en
+localStorage).
+
 ## Estructura del proyecto
 
 Ver [CLAUDE.md](./CLAUDE.md) para la convención completa de carpetas, estilo de código y
@@ -78,6 +95,7 @@ arquitectura por capas.
 
 ## Estado actual
 
-Este repo está en **Fase 1 — Scaffold**: estructura de carpetas, configuración de infraestructura
-y health check. Sin lógica de negocio todavía. Ver [docs/plan-clinica.md](./docs/plan-clinica.md)
-para las fases siguientes.
+Backend: módulos de patients, doctors, appointments (state machine + Stripe), webhooks de Stripe
+con idempotencia, colas (BullMQ) de expiración/email/reminders/no-show, panel administrativo
+(API) y dead-letter. Frontend: panel admin (Dashboard, Citas, Detalle de cita, Dead Letter).
+Ver [docs/plan-clinica.md](./docs/plan-clinica.md) para el detalle de cada fase.

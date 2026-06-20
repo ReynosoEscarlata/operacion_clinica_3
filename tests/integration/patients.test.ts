@@ -81,6 +81,36 @@ describe('Patients CRUD (integración con DB real, Stripe mockeado)', () => {
     expect(response.json().error.code).toBe('PATIENT_NOT_FOUND');
   });
 
+  it('busca un paciente por email (usado por el flujo público de reserva)', async () => {
+    const response = await app.inject({
+      method: 'GET',
+      url: `/api/patients/by-email?email=${encodeURIComponent(testEmail)}`,
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().id).toBe(createdId);
+  });
+
+  it('retorna 404 al buscar por un email que no existe', async () => {
+    const unknownEmail = `nadie-${randomUUID()}@example.com`;
+    const response = await app.inject({
+      method: 'GET',
+      url: `/api/patients/by-email?email=${encodeURIComponent(unknownEmail)}`,
+    });
+
+    expect(response.statusCode).toBe(404);
+    expect(response.json().error.code).toBe('PATIENT_NOT_FOUND');
+  });
+
+  it('rechaza un email con formato inválido en la búsqueda por email', async () => {
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/patients/by-email?email=no-es-un-email',
+    });
+
+    expect(response.statusCode).toBe(400);
+  });
+
   it('actualiza el nombre del paciente', async () => {
     const response = await app.inject({
       method: 'PATCH',

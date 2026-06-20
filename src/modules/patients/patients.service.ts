@@ -75,6 +75,14 @@ export class PatientService {
     return patient;
   }
 
+  async getByEmail(email: string): Promise<Patient> {
+    const patient = await this.repository.findByEmail(email);
+    if (!patient) {
+      throw new AppError(404, 'PATIENT_NOT_FOUND', 'Paciente no encontrado');
+    }
+    return patient;
+  }
+
   async update(id: string, dto: UpdatePatientDto): Promise<Patient> {
     const patient = await this.repository.update(id, dto);
     if (!patient) {

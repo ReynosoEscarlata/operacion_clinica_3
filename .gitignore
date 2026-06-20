@@ -4,3 +4,4 @@ coverage
 .env
 *.log
 .DS_Store
+src/prisma/.demo-appointment-ids.json

@@ -25,3 +25,8 @@ export const ListPatientsQuery = Type.Object({
   limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 100 })),
 });
 export type ListPatientsQueryDto = Static<typeof ListPatientsQuery>;
+
+export const FindPatientByEmailQuery = Type.Object({
+  email: Type.String({ format: 'email' }),
+});
+export type FindPatientByEmailQueryDto = Static<typeof FindPatientByEmailQuery>;
