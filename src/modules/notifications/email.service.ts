@@ -12,7 +12,6 @@ export interface EmailService {
 }
 
 const CLINIC_NAME = 'Clínica Scheduler';
-const CLINIC_EMAIL = 'noreply@clinicascheduler.com';
 
 // Templates HTML simples en desarrollo
 const confirmationTemplate = (appointmentId: string, patientName: string, dateTime: string): string => `
@@ -189,7 +188,7 @@ export class ResendEmailService implements EmailService {
     }
 
     await this.resend.emails.send({
-      from: CLINIC_EMAIL,
+      from: env.RESEND_FROM_EMAIL,
       to: patient.email,
       subject: 'Cita confirmada - Clínica Scheduler',
       html: confirmationTemplate(appointment.id, patient.name, dateTime),
@@ -221,7 +220,7 @@ export class ResendEmailService implements EmailService {
     }
 
     await this.resend.emails.send({
-      from: CLINIC_EMAIL,
+      from: env.RESEND_FROM_EMAIL,
       to: patient.email,
       subject: 'Recordatorio de tu cita - Clínica Scheduler',
       html: reminderTemplate(appointment.id, patient.name, dateTime),
@@ -257,7 +256,7 @@ export class ResendEmailService implements EmailService {
     }
 
     await this.resend.emails.send({
-      from: CLINIC_EMAIL,
+      from: env.RESEND_FROM_EMAIL,
       to: patient.email,
       subject: 'Cita cancelada - Reembolso procesado - Clínica Scheduler',
       html: cancellationTemplate(appointment.id, patient.name, refundAmount),
@@ -288,7 +287,7 @@ export class ResendEmailService implements EmailService {
     }
 
     await this.resend.emails.send({
-      from: CLINIC_EMAIL,
+      from: env.RESEND_FROM_EMAIL,
       to: patient.email,
       subject: 'Pago no procesado - Clínica Scheduler',
       html: paymentFailedTemplate(appointment.id, patient.name),
