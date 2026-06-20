@@ -11,6 +11,7 @@ import { registerAppointmentRoutes, type AppointmentRoutesDeps } from './modules
 import { registerDoctorRoutes, type DoctorRoutesDeps } from './modules/doctors/index.js';
 import { registerPatientRoutes, type PatientRoutesDeps } from './modules/patients/index.js';
 import { registerWebhookRoutes, type WebhookRoutesDeps } from './modules/payments/index.js';
+import { registerAdminRoutes, type AdminRoutesDeps } from './modules/admin/index.js';
 
 export interface BuildAppDeps {
   prisma?: Parameters<typeof checkDatabase>[0];
@@ -19,6 +20,7 @@ export interface BuildAppDeps {
   doctors?: DoctorRoutesDeps;
   appointments?: AppointmentRoutesDeps;
   webhooks?: WebhookRoutesDeps;
+  admin?: AdminRoutesDeps;
 }
 
 export const buildApp = (deps: BuildAppDeps = {}): FastifyInstance => {
@@ -36,6 +38,7 @@ export const buildApp = (deps: BuildAppDeps = {}): FastifyInstance => {
   registerDoctorRoutes(app, deps.doctors);
   registerAppointmentRoutes(app, deps.appointments);
   registerWebhookRoutes(app, deps.webhooks);
+  registerAdminRoutes(app, deps.admin);
 
   app.get('/health', async (request, reply) => {
     const [database, redisStatus] = await Promise.all([

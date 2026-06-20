@@ -5,6 +5,7 @@ import { getRedisConnectionOptions } from '../config/redis.js';
 export const APPOINTMENT_EXPIRATION_QUEUE = 'appointment-expiration';
 export const EMAIL_NOTIFICATIONS_QUEUE = 'email-notifications';
 export const APPOINTMENT_REMINDERS_QUEUE = 'appointment-reminders';
+export const APPOINTMENT_NOSHOW_QUEUE = 'appointment-noshow';
 
 const connection = getRedisConnectionOptions();
 
@@ -42,8 +43,20 @@ export const appointmentRemindersQueue = new Queue(APPOINTMENT_REMINDERS_QUEUE, 
   },
 });
 
+// Job repeatable (cron) cada 15 minutos. No tiene reintentos (si falla, la próxima
+// ejecución del cron lo recoge). removeOnComplete en false para auditoría.
+export const appointmentNoShowQueue = new Queue(APPOINTMENT_NOSHOW_QUEUE, {
+  connection,
+  defaultJobOptions: {
+    attempts: 1,
+    removeOnComplete: false,
+    removeOnFail: false,
+  },
+});
+
 export const closeQueues = async (): Promise<void> => {
   await appointmentExpirationQueue.close();
   await emailNotificationsQueue.close();
   await appointmentRemindersQueue.close();
+  await appointmentNoShowQueue.close();
 };
