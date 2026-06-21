@@ -1,0 +1,92 @@
+name: CI - payments
+
+on:
+  push:
+    branches: ['**']
+    paths:
+      - 'services/payments/**'
+      - 'packages/contracts/payments/**'
+      # Contract test (Pact, PLAN.md Fase 4): ver nota equivalente en
+      # doctors-ci.yml.
+      - 'pacts/appointments-payments.json'
+      - 'tsconfig.base.json'
+      - '.github/workflows/payments-ci.yml'
+  pull_request:
+    branches: ['**']
+    paths:
+      - 'services/payments/**'
+      - 'packages/contracts/payments/**'
+      # Contract test (Pact, PLAN.md Fase 4): ver nota equivalente en
+      # doctors-ci.yml.
+      - 'pacts/appointments-payments.json'
+      - 'tsconfig.base.json'
+      - '.github/workflows/payments-ci.yml'
+
+defaults:
+  run:
+    working-directory: services/payments
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: payments
+          POSTGRES_PASSWORD: payments
+          POSTGRES_DB: payments_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U payments"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      NODE_ENV: test
+      PORT: 4004
+      LOG_LEVEL: silent
+      DATABASE_URL: postgresql://payments:payments@localhost:5432/payments_db?schema=public
+      REDIS_URL: redis://localhost:6379
+      STRIPE_SECRET_KEY: sk_test_dummy
+      STRIPE_WEBHOOK_SECRET: whsec_dummy
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Generate Prisma Client
+        run: npm run prisma:generate
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Apply migrations
+        run: npx prisma migrate deploy
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm run test

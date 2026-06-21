@@ -1,0 +1,407 @@
+openapi: 3.1.0
+info:
+  title: Appointments API
+  version: "1.0.0"
+  description: >
+    Core del dominio: state machine de citas (ver SPEC.md sección 1) e
+    incluye Patients como sub-dominio (RFC-001 decisión: los pacientes no
+    tienen identidad de auth propia, así que separarlos hoy sería extracción
+    prematura — queda como candidato a extracción futura).
+    Posee tabla Outbox (ver ADR-002) para publicar AppointmentCreated /
+    AppointmentStatusChanged / PatientUpdated de forma confiable.
+    Depende síncronamente de Doctors (slots) y Payments (PaymentIntent) al
+    crear una cita; NUNCA depende síncronamente de Notifications (regla
+    central del plan — degraded mode).
+servers:
+  - url: /v1
+
+paths:
+  /patients:
+    post:
+      summary: Crear paciente
+      operationId: createPatient
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, name, phone]
+              properties:
+                email: { type: string, format: email }
+                name: { type: string }
+                phone: { type: string }
+      responses:
+        "201":
+          description: Paciente creado (+ Stripe Customer vía Payments)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Patient" }
+    get:
+      summary: Listar pacientes (paginación cursor)
+      operationId: listPatients
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Listado paginado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/Patient" }
+
+  /patients/by-email:
+    get:
+      summary: Buscar paciente por email
+      operationId: findPatientByEmail
+      description: >
+        Sin autenticación: usado por el flujo público de reserva para evitar
+        crear un paciente duplicado cuando el mismo email ya tiene una
+        cuenta. Replica el comportamiento ya existente del monolito
+        (`GET /api/patients/by-email`).
+      parameters:
+        - name: email
+          in: query
+          required: true
+          schema: { type: string, format: email }
+      responses:
+        "200":
+          description: Paciente encontrado
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Patient" }
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /patients/{id}:
+    get:
+      summary: Detalle de paciente con citas
+      operationId: getPatient
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Detalle del paciente
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Patient" }
+        "404":
+          $ref: "#/components/responses/NotFound"
+    patch:
+      summary: Actualizar datos de paciente
+      operationId: updatePatient
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string }
+                phone: { type: string }
+      responses:
+        "200":
+          description: Paciente actualizado. Publica evento PatientUpdated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Patient" }
+
+  /appointments:
+    get:
+      summary: Listar citas con filtros
+      operationId: listAppointments
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: status
+          in: query
+          schema: { $ref: "#/components/schemas/AppointmentStatus" }
+        - name: doctorId
+          in: query
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Listado filtrado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/Appointment" }
+    post:
+      summary: Crear cita
+      operationId: createAppointment
+      description: >
+        Orquesta: verifica slot disponible (síncrono → Doctors), crea la
+        cita en PENDING, llama a Payments (síncrono) para crear el
+        PaymentIntent, transiciona a CONFIRMED y publica AppointmentCreated
+        vía Outbox.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [patientId, doctorId, dateTime]
+              properties:
+                patientId: { type: string, format: uuid }
+                doctorId: { type: string, format: uuid }
+                dateTime: { type: string, format: date-time }
+      responses:
+        "201":
+          description: Cita creada en estado CONFIRMED, con clientSecret para pagar
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  appointment: { $ref: "#/components/schemas/Appointment" }
+                  clientSecret: { type: string }
+        "409":
+          description: Slot ya no disponible
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /appointments/{id}:
+    get:
+      summary: Detalle de cita con eventos
+      operationId: getAppointment
+      description: >
+        Sin autenticación: el paciente accede con el UUID de su propia cita
+        (ej. desde el link del email de confirmación), no tiene cuenta
+        propia (ver RFC-001 decisión 1). El UUID actúa como capability token
+        — no listamos citas de otros pacientes por este medio.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Detalle con timeline de AppointmentEvent
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AppointmentWithEvents" }
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /appointments/{id}/cancel:
+    patch:
+      summary: Cancelar cita
+      operationId: cancelAppointment
+      description: >
+        Aplica política de refund según SPEC.md sección 5.2. Si corresponde
+        refund, llama a Payments (síncrono, porque el resultado del refund
+        se necesita para informar al usuario el monto reembolsado en la
+        misma respuesta). Sin autenticación: tanto el paciente (vía UUID de
+        su cita) como un Admin/Staff (vía panel) pueden cancelar — replica
+        el comportamiento ya existente del monolito, donde `cancel` no está
+        detrás de `requireAdminAuth` a diferencia de `complete`/`no-show`.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason: { type: string }
+      responses:
+        "200":
+          description: Cita cancelada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  appointment: { $ref: "#/components/schemas/Appointment" }
+                  refundAmountCents: { type: integer }
+        "400":
+          description: Transición de estado inválida
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /appointments/{id}/complete:
+    patch:
+      summary: Marcar cita como completada
+      operationId: completeAppointment
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Cita marcada COMPLETED
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Appointment" }
+
+  /appointments/{id}/no-show:
+    patch:
+      summary: Marcar cita como no-show manual
+      operationId: markNoShow
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Cita marcada NO_SHOW
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Appointment" }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    AppointmentStatus:
+      type: string
+      enum: [PENDING, CONFIRMED, PAID, REMINDED, COMPLETED, CANCELLED, NO_SHOW]
+
+    Patient:
+      type: object
+      required: [id, email, name, phone, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        email: { type: string, format: email }
+        name: { type: string }
+        phone: { type: string }
+        createdAt: { type: string, format: date-time }
+
+    Appointment:
+      type: object
+      required: [id, patientId, doctorId, dateTime, status, amountCents]
+      properties:
+        id: { type: string, format: uuid }
+        patientId: { type: string, format: uuid }
+        doctorId: { type: string, format: uuid }
+        dateTime: { type: string, format: date-time }
+        status: { $ref: "#/components/schemas/AppointmentStatus" }
+        amountCents: { type: integer }
+        cancellationReason: { type: string, nullable: true }
+
+    AppointmentEvent:
+      type: object
+      required: [id, type, payload, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        type: { type: string }
+        payload: { type: object }
+        createdAt: { type: string, format: date-time }
+
+    AppointmentWithEvents:
+      allOf:
+        - { $ref: "#/components/schemas/Appointment" }
+        - type: object
+          properties:
+            events:
+              type: array
+              items: { $ref: "#/components/schemas/AppointmentEvent" }
+
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message, requestId]
+          properties:
+            code: { type: string }
+            message: { type: string }
+            requestId: { type: string, format: uuid }
+
+    # --- Eventos publicados por Appointments (vía Outbox, ver ADR-002) ---
+    AppointmentCreatedEvent:
+      type: object
+      required: [eventId, eventType, occurredAt, data]
+      properties:
+        eventId: { type: string, format: uuid }
+        eventType: { type: string, const: "AppointmentCreated" }
+        occurredAt: { type: string, format: date-time }
+        data:
+          type: object
+          required: [appointmentId, patientId, doctorId, dateTime]
+          properties:
+            appointmentId: { type: string, format: uuid }
+            patientId: { type: string, format: uuid }
+            doctorId: { type: string, format: uuid }
+            dateTime: { type: string, format: date-time }
+
+    AppointmentStatusChangedEvent:
+      type: object
+      description: >
+        Consumido por Notifications para decidir si envía email (confirmación,
+        recordatorio, cancelación) y para actualizar su read-model propio
+        (ver RFC-001 decisión 4).
+      required: [eventId, eventType, occurredAt, data]
+      properties:
+        eventId: { type: string, format: uuid }
+        eventType: { type: string, const: "AppointmentStatusChanged" }
+        occurredAt: { type: string, format: date-time }
+        data:
+          type: object
+          required: [appointmentId, from, to, trigger]
+          properties:
+            appointmentId: { type: string, format: uuid }
+            from: { $ref: "#/components/schemas/AppointmentStatus" }
+            to: { $ref: "#/components/schemas/AppointmentStatus" }
+            trigger: { type: string, example: "webhook" }
+
+    PatientUpdatedEvent:
+      type: object
+      required: [eventId, eventType, occurredAt, data]
+      properties:
+        eventId: { type: string, format: uuid }
+        eventType: { type: string, const: "PatientUpdated" }
+        occurredAt: { type: string, format: date-time }
+        data:
+          type: object
+          required: [patientId, email, name]
+          properties:
+            patientId: { type: string, format: uuid }
+            email: { type: string, format: email }
+            name: { type: string }
+
+  responses:
+    NotFound:
+      description: Recurso no encontrado
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+
+x-events-published:
+  - AppointmentCreated
+  - AppointmentStatusChanged
+  - PatientUpdated
+x-events-consumed:
+  - PaymentSucceeded
+  - PaymentFailed
+  - RefundIssued

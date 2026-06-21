@@ -1,0 +1,226 @@
+openapi: 3.1.0
+info:
+  title: Doctors API
+  version: "1.0.0"
+  description: >
+    Perfil de doctor, disponibilidad y cálculo de slots libres (ver RFC-001
+    decisión 5: Doctors es un servicio separado con su propia BD).
+    Appointments lo consulta de forma síncrona para queries de slots
+    (ver ADR-001) y consume sus eventos para mantener su propio read-model
+    cuando aplique.
+servers:
+  - url: /v1
+
+paths:
+  /doctors:
+    post:
+      summary: Crear doctor
+      operationId: createDoctor
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateDoctorDto" }
+      responses:
+        "201":
+          description: Doctor creado. Publica evento DoctorCreated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Doctor" }
+    get:
+      summary: Listar doctores
+      operationId: listDoctors
+      responses:
+        "200":
+          description: Listado de doctores
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/Doctor" }
+
+  /doctors/{id}:
+    get:
+      summary: Detalle de doctor con disponibilidad
+      operationId: getDoctor
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Detalle del doctor
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DoctorWithAvailability" }
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /doctors/{id}/availability:
+    post:
+      summary: Definir disponibilidad semanal del doctor
+      operationId: setAvailability
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [dayOfWeek, startTime, endTime]
+              properties:
+                dayOfWeek: { type: integer, minimum: 0, maximum: 6 }
+                startTime: { type: string, example: "09:00" }
+                endTime: { type: string, example: "17:00" }
+      responses:
+        "201":
+          description: Disponibilidad creada. Publica evento DoctorUpdated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Availability" }
+
+  /doctors/{id}/slots:
+    get:
+      summary: Slots libres para una fecha dada
+      operationId: getSlots
+      description: >
+        Query síncrona consumida por Appointments al momento de reservar
+        (ver ADR-001: es una query, no un side effect, por eso es HTTP
+        síncrono y no un read-model con eventos).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: date
+          in: query
+          required: true
+          schema: { type: string, format: date }
+      responses:
+        "200":
+          description: Slots disponibles
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  slots:
+                    type: array
+                    items: { type: string, format: date-time }
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    CreateDoctorDto:
+      type: object
+      required: [name, email, specialty]
+      properties:
+        name: { type: string }
+        email: { type: string, format: email }
+        specialty: { type: string }
+        consultationPriceCents: { type: integer, default: 50000 }
+
+    Doctor:
+      type: object
+      required: [id, name, email, specialty, consultationPriceCents, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        email: { type: string, format: email }
+        specialty: { type: string }
+        consultationPriceCents: { type: integer }
+        createdAt: { type: string, format: date-time }
+
+    Availability:
+      type: object
+      required: [id, doctorId, dayOfWeek, startTime, endTime]
+      properties:
+        id: { type: string, format: uuid }
+        doctorId: { type: string, format: uuid }
+        dayOfWeek: { type: integer }
+        startTime: { type: string }
+        endTime: { type: string }
+
+    DoctorWithAvailability:
+      allOf:
+        - { $ref: "#/components/schemas/Doctor" }
+        - type: object
+          properties:
+            availabilities:
+              type: array
+              items: { $ref: "#/components/schemas/Availability" }
+
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message, requestId]
+          properties:
+            code: { type: string }
+            message: { type: string }
+            requestId: { type: string, format: uuid }
+
+    # --- Eventos publicados por Doctors ---
+    DoctorCreatedEvent:
+      type: object
+      required: [eventId, eventType, occurredAt, data]
+      properties:
+        eventId: { type: string, format: uuid }
+        eventType: { type: string, const: "DoctorCreated" }
+        occurredAt: { type: string, format: date-time }
+        data:
+          type: object
+          required: [doctorId, name, specialty]
+          properties:
+            doctorId: { type: string, format: uuid }
+            name: { type: string }
+            specialty: { type: string }
+
+    DoctorUpdatedEvent:
+      type: object
+      description: >
+        Consumido por Notifications para mantener su read-model propio
+        (ver RFC-001 decisión 4).
+      required: [eventId, eventType, occurredAt, data]
+      properties:
+        eventId: { type: string, format: uuid }
+        eventType: { type: string, const: "DoctorUpdated" }
+        occurredAt: { type: string, format: date-time }
+        data:
+          type: object
+          required: [doctorId, name, specialty]
+          properties:
+            doctorId: { type: string, format: uuid }
+            name: { type: string }
+            specialty: { type: string }
+
+  responses:
+    NotFound:
+      description: Recurso no encontrado
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+
+x-events-published:
+  - DoctorCreated
+  - DoctorUpdated
+x-events-consumed: []

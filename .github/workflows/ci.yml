@@ -1,10 +1,33 @@
 name: CI
 
+# Paths filter agregado en Challenge 4 (Fase 1): este workflow es el del
+# monolito (Challenge 3) y solo debe correr cuando cambia código del
+# monolito, no cuando cambia un servicio nuevo en services/** o el gateway
+# (cada uno tiene su propio workflow con su propio paths filter) — esto es
+# lo que habilita "deploy independiente por servicio".
 on:
   push:
     branches: ['**']
+    paths:
+      - 'src/**'
+      - 'tests/**'
+      - 'admin/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'tsconfig.json'
+      - '.eslintrc.cjs'
+      - '.github/workflows/ci.yml'
   pull_request:
     branches: ['**']
+    paths:
+      - 'src/**'
+      - 'tests/**'
+      - 'admin/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'tsconfig.json'
+      - '.eslintrc.cjs'
+      - '.github/workflows/ci.yml'
 
 jobs:
   lint-and-test:

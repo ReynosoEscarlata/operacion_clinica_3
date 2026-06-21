@@ -1,0 +1,47 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Doctor {
+  id                     String   @id @default(uuid()) @db.Uuid
+  name                   String
+  email                  String
+  specialty              String
+  consultationPriceCents Int      @default(50000)
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+
+  availabilities Availability[]
+}
+
+model Availability {
+  id        String @id @default(uuid()) @db.Uuid
+  doctorId  String @db.Uuid
+  dayOfWeek Int
+  startTime String
+  endTime   String
+
+  doctor Doctor @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+
+  @@index([doctorId])
+}
+
+// Outbox (ADR-002): DoctorCreated/DoctorUpdated se escriben en la misma
+// transacción que el cambio. El relay a Redis Streams los publica;
+// Appointments los consulta vía HTTP síncrono para slots (ADR-001, es una
+// query), pero Notifications los consume async para su DoctorSnapshot
+// (RFC-001 decisión 4).
+model OutboxEvent {
+  id          String    @id @default(uuid()) @db.Uuid
+  type        String
+  payload     Json
+  publishedAt DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@index([publishedAt])
+}

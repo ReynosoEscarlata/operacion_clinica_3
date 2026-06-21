@@ -29,6 +29,231 @@ services:
       timeout: 5s
       retries: 5
 
+  # --- Servicios nuevos (Challenge 4, Fase 1 — esqueletos sin lógica de
+  # negocio todavía, ver PLAN.md). El monolito de arriba (postgres, redis,
+  # app del monolito vía `npm run dev`) sigue intacto: estrategia strangler
+  # fig, el E2E del Challenge 3 no se toca.
+
+  postgres-auth:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: auth
+      POSTGRES_PASSWORD: auth
+      POSTGRES_DB: auth_db
+    ports:
+      - '5433:5432'
+    volumes:
+      - postgres-auth-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U auth']
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  postgres-appointments:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: appointments
+      POSTGRES_PASSWORD: appointments
+      POSTGRES_DB: appointments_db
+    ports:
+      - '5434:5432'
+    volumes:
+      - postgres-appointments-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U appointments']
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  postgres-doctors:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: doctors
+      POSTGRES_PASSWORD: doctors
+      POSTGRES_DB: doctors_db
+    ports:
+      - '5435:5432'
+    volumes:
+      - postgres-doctors-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U doctors']
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  postgres-payments:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: payments
+      POSTGRES_PASSWORD: payments
+      POSTGRES_DB: payments_db
+    ports:
+      - '5436:5432'
+    volumes:
+      - postgres-payments-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U payments']
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  postgres-notifications:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: notifications
+      POSTGRES_PASSWORD: notifications
+      POSTGRES_DB: notifications_db
+    ports:
+      - '5437:5432'
+    volumes:
+      - postgres-notifications-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U notifications']
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  auth:
+    build: ./services/auth
+    restart: unless-stopped
+    environment:
+      NODE_ENV: development
+      PORT: 4001
+      DATABASE_URL: postgresql://auth:auth@postgres-auth:5432/auth_db?schema=public
+      REDIS_URL: redis://redis:6379
+    ports:
+      - '4001:4001'
+    depends_on:
+      postgres-auth:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  appointments:
+    build: ./services/appointments
+    restart: unless-stopped
+    environment:
+      NODE_ENV: development
+      PORT: 4002
+      DATABASE_URL: postgresql://appointments:appointments@postgres-appointments:5432/appointments_db?schema=public
+      REDIS_URL: redis://redis:6379
+      DOCTORS_SERVICE_URL: http://doctors:4003
+      PAYMENTS_SERVICE_URL: http://payments:4004
+    ports:
+      - '4002:4002'
+    depends_on:
+      postgres-appointments:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  doctors:
+    build: ./services/doctors
+    restart: unless-stopped
+    environment:
+      NODE_ENV: development
+      PORT: 4003
+      DATABASE_URL: postgresql://doctors:doctors@postgres-doctors:5432/doctors_db?schema=public
+      REDIS_URL: redis://redis:6379
+    ports:
+      - '4003:4003'
+    depends_on:
+      postgres-doctors:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  payments:
+    build: ./services/payments
+    restart: unless-stopped
+    environment:
+      NODE_ENV: development
+      PORT: 4004
+      DATABASE_URL: postgresql://payments:payments@postgres-payments:5432/payments_db?schema=public
+      REDIS_URL: redis://redis:6379
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-sk_test_dummy}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-whsec_dummy}
+    ports:
+      - '4004:4004'
+    depends_on:
+      postgres-payments:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  notifications:
+    build: ./services/notifications
+    restart: unless-stopped
+    environment:
+      NODE_ENV: development
+      PORT: 4005
+      DATABASE_URL: postgresql://notifications:notifications@postgres-notifications:5432/notifications_db?schema=public
+      REDIS_URL: redis://redis:6379
+      RESEND_API_KEY: ${RESEND_API_KEY:-re_dummy}
+      RESEND_FROM_EMAIL: ${RESEND_FROM_EMAIL:-no-reply@clinica.example.com}
+    ports:
+      - '4005:4005'
+    depends_on:
+      postgres-notifications:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  gateway:
+    build: ./gateway
+    restart: unless-stopped
+    environment:
+      NODE_ENV: development
+      PORT: 4000
+      AUTH_JWKS_URL: http://auth:4001/v1/auth/.well-known/jwks.json
+      AUTH_SERVICE_URL: http://auth:4001
+      APPOINTMENTS_SERVICE_URL: http://appointments:4002
+      DOCTORS_SERVICE_URL: http://doctors:4003
+      PAYMENTS_SERVICE_URL: http://payments:4004
+      NOTIFICATIONS_SERVICE_URL: http://notifications:4005
+    ports:
+      - '4000:4000'
+    depends_on:
+      - auth
+      - appointments
+      - doctors
+      - payments
+      - notifications
+
+  prometheus:
+    image: prom/prometheus:latest
+    restart: unless-stopped
+    volumes:
+      - ./infra/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - '9090:9090'
+
+  grafana:
+    image: grafana/grafana:latest
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_AUTH_ANONYMOUS_ENABLED: 'true'
+    volumes:
+      - ./infra/grafana/provisioning:/etc/grafana/provisioning:ro
+      - grafana-data:/var/lib/grafana
+    ports:
+      - '3001:3000'
+    depends_on:
+      - prometheus
+
 volumes:
   postgres-data:
   redis-data:
+  postgres-auth-data:
+  postgres-appointments-data:
+  postgres-doctors-data:
+  postgres-payments-data:
+  postgres-notifications-data:
+  grafana-data:

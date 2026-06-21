@@ -1,32 +1,38 @@
 import { useEffect, useState } from 'react';
 
-import { ApiError, fetchDashboard } from '../lib/api';
+import { ApiError, fetchDashboard, fetchDoctors } from '../lib/api';
 import { useAdminAuth } from '../context/AdminAuthContext';
 import { useToast } from '../context/ToastContext';
 import { Layout } from '../components/Layout';
 import { StatsCard } from '../components/StatsCard';
 import { formatCents, formatPercentage } from '../lib/format';
-import type { DashboardStats } from '../lib/types';
+import type { DashboardStats, Doctor } from '../lib/types';
 
 const SkeletonCard = (): JSX.Element => (
   <div className="h-24 animate-pulse rounded-card border border-black-300 bg-ice" />
 );
 
 export const DashboardPage = (): JSX.Element => {
-  const { adminKey } = useAdminAuth();
+  const { accessToken } = useAdminAuth();
   const { showToast } = useToast();
   const [stats, setStats] = useState<DashboardStats | null>(null);
+  const [doctorsById, setDoctorsById] = useState<Map<string, Doctor>>(new Map());
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    if (!adminKey) return;
+    if (!accessToken) return;
 
     let isMounted = true;
     setIsLoading(true);
 
-    fetchDashboard(adminKey)
-      .then((data) => {
-        if (isMounted) setStats(data);
+    // Appointments no tiene el nombre del doctor (RFC-001 decisión 5: cero
+    // estado compartido) — se resuelve acá con la lista de doctores, que de
+    // todas formas ya se necesita en otras pantallas.
+    Promise.all([fetchDashboard(accessToken), fetchDoctors()])
+      .then(([data, doctors]) => {
+        if (!isMounted) return;
+        setStats(data);
+        setDoctorsById(new Map(doctors.map((doctor) => [doctor.id, doctor])));
       })
       .catch((error: unknown) => {
         const message = error instanceof ApiError ? error.message : 'No se pudo cargar el dashboard';
@@ -40,7 +46,7 @@ export const DashboardPage = (): JSX.Element => {
       isMounted = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [adminKey]);
+  }, [accessToken]);
 
   const totalNoShow = stats?.noShowRateByDoctor.reduce((sum, doctor) => sum + doctor.noShowCount, 0) ?? 0;
   const totalCompleted = stats?.noShowRateByDoctor.reduce((sum, doctor) => sum + doctor.completedCount, 0) ?? 0;
@@ -70,11 +76,11 @@ export const DashboardPage = (): JSX.Element => {
         <div className="mt-8 rounded-card border border-black-300 bg-white p-6">
           <h3 className="text-lg font-semibold text-black-900">Tasa de no-show por doctor</h3>
           <ul className="mt-4 flex flex-col gap-2">
-            {stats.noShowRateByDoctor.map((doctor) => (
-              <li key={doctor.doctorId} className="flex items-center justify-between text-sm">
-                <span className="text-black-900">{doctor.doctorName}</span>
+            {stats.noShowRateByDoctor.map((row) => (
+              <li key={row.doctorId} className="flex items-center justify-between text-sm">
+                <span className="text-black-900">{doctorsById.get(row.doctorId)?.name ?? row.doctorId}</span>
                 <span className="text-black-600">
-                  {formatPercentage(doctor.rate)} ({doctor.noShowCount}/{doctor.noShowCount + doctor.completedCount})
+                  {formatPercentage(row.rate)} ({row.noShowCount}/{row.noShowCount + row.completedCount})
                 </span>
               </li>
             ))}

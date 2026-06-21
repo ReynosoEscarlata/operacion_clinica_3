@@ -1,0 +1,36 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Idempotencia de webhooks (patrón obligatorio según CLAUDE.md): se inserta
+// antes de procesar, marcando processedAt al terminar. Si el insert falla
+// por unique constraint, el evento ya fue reclamado por otra instancia/
+// reintento y se ignora.
+model WebhookEvent {
+  id            String    @id @default(uuid()) @db.Uuid
+  stripeEventId String    @unique
+  type          String
+  payload       Json
+  processedAt   DateTime?
+  createdAt     DateTime  @default(now())
+}
+
+// Outbox (ADR-002): PaymentSucceeded/PaymentFailed/RefundIssued se escriben
+// aquí al procesar el webhook, en la misma transacción que marcar el
+// WebhookEvent como procesado. El relay a Redis Streams (Fase 3) los
+// publica; Appointments los consume para avanzar su propia state machine
+// — Payments nunca toca la BD de Appointments directamente (RFC-001).
+model OutboxEvent {
+  id          String    @id @default(uuid()) @db.Uuid
+  type        String
+  payload     Json
+  publishedAt DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@index([publishedAt])
+}

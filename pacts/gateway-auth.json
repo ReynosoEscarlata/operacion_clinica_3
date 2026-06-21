@@ -1,0 +1,80 @@
+{
+  "consumer": {
+    "name": "gateway"
+  },
+  "interactions": [
+    {
+      "description": "una consulta del JWKS público",
+      "providerStates": [
+        {
+          "name": "Auth tiene un par de llaves RS256 activo"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/v1/auth/.well-known/jwks.json"
+      },
+      "response": {
+        "body": {
+          "keys": [
+            {
+              "alg": "RS256",
+              "e": "AQAB",
+              "kid": "test-kid-1",
+              "kty": "RSA",
+              "n": "ySezesYjvPwAb3YGQGEhtz8MqaBp8FaeayUkHnM3aBgRy714nwNPvOfIYjawCL-F1LUc-l-23DFe4UNc4V0PC6XreoASDSBFivvG_dciBmc5LgRfcZiR98KY9Jl0NGBZhq0mnrQA46SgqIYXscII-Vp68f9YSiN8hiRJKj90qUmCzEFLxDsmfHnlc-cGkGSxb9TzxVxJUiJO11IFyDGXjiFdGDOcSVsvd6QygBcVlmo416egXJ1MWP0FilKiuzaVuXIR_Dxlm7MpJbVkpi_XRYrwhJbObRzs6q-2UsxDG-HrGj6Dl_NO0n3rWniPQhsc9w-TI0JvRmhPwu22i2seSQ",
+              "use": "sig"
+            }
+          ]
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$.keys[0].e": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.keys[0].kid": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.keys[0].n": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    }
+  ],
+  "metadata": {
+    "pact-js": {
+      "version": "16.5.0"
+    },
+    "pactRust": {
+      "ffi": "0.5.4",
+      "models": "1.3.11"
+    },
+    "pactSpecification": {
+      "version": "3.0.0"
+    }
+  },
+  "provider": {
+    "name": "auth"
+  }
+}

@@ -1,0 +1,86 @@
+name: CI - notifications
+
+on:
+  push:
+    branches: ['**']
+    paths:
+      - 'services/notifications/**'
+      - 'packages/contracts/notifications/**'
+      - 'tsconfig.base.json'
+      - '.github/workflows/notifications-ci.yml'
+  pull_request:
+    branches: ['**']
+    paths:
+      - 'services/notifications/**'
+      - 'packages/contracts/notifications/**'
+      - 'tsconfig.base.json'
+      - '.github/workflows/notifications-ci.yml'
+
+defaults:
+  run:
+    working-directory: services/notifications
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: notifications
+          POSTGRES_PASSWORD: notifications
+          POSTGRES_DB: notifications_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U notifications"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      NODE_ENV: test
+      PORT: 4005
+      LOG_LEVEL: silent
+      DATABASE_URL: postgresql://notifications:notifications@localhost:5432/notifications_db?schema=public
+      REDIS_URL: redis://localhost:6379
+      RESEND_API_KEY: re_dummy
+      RESEND_FROM_EMAIL: no-reply@clinica.example.com
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Generate Prisma Client
+        run: npm run prisma:generate
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Apply migrations
+        run: npx prisma migrate deploy
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm run test

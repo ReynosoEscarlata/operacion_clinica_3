@@ -25,8 +25,10 @@ export interface AppointmentListItem {
   noShowAt: string | null;
   createdAt: string;
   updatedAt: string;
+  // Appointments no tiene datos de Doctors (RFC-001 decisión 5: cero
+  // estado compartido) — solo el id. El nombre se resuelve en el cliente
+  // contra la lista de doctores que ya se pide para el filtro.
   patient: { id: string; name: string };
-  doctor: { id: string; name: string };
 }
 
 export interface ListAppointmentsResult {
@@ -77,7 +79,6 @@ export interface AppointmentDetail {
   createdAt: string;
   updatedAt: string;
   patient: Patient;
-  doctor: Doctor;
   events: AppointmentEvent[];
 }
 
@@ -105,7 +106,6 @@ export interface DashboardStats {
   revenue: { today: number; thisWeek: number; thisMonth: number };
   noShowRateByDoctor: Array<{
     doctorId: string;
-    doctorName: string;
     noShowCount: number;
     completedCount: number;
     rate: number;
@@ -116,23 +116,24 @@ export interface RecentEvent {
   id: string;
   appointmentId: string;
   type: string;
-  payload: Record<string, unknown>;
+  payload: unknown;
   createdAt: string;
-  appointment: {
-    id: string;
-    patient: { name: string };
-    doctor: { name: string };
-  };
 }
+
+// "source" distingue de qué servicio vino la entrada — Appointments y
+// Notifications tienen cada uno su propia tabla de dead-letter (RFC-002:
+// no hay agregador, el panel pega a los dos por separado).
+export type DeadLetterSource = 'appointments' | 'notifications';
 
 export interface DeadLetterJob {
   id: string;
-  queueName: string;
-  jobName: string;
-  data: Record<string, unknown>;
-  failedReason: string;
-  attemptsMade: number;
-  timestamp: string;
+  eventId: string;
+  eventType: string;
+  payload: unknown;
+  error: string;
+  attempts: number;
+  failedAt: string;
+  source: DeadLetterSource;
 }
 
 export interface DeadLetterListResult {

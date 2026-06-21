@@ -1,0 +1,31 @@
+# Scrape config base (Fase 1: cableado, sin métricas RED reales todavía —
+# eso es Fase 4 del plan, con prom-client por endpoint + k6/autocannon para
+# generar datos reales durante la demo).
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  - job_name: gateway
+    static_configs:
+      - targets: ['gateway:4000']
+    metrics_path: /metrics
+
+  - job_name: auth
+    static_configs:
+      - targets: ['auth:4001']
+
+  - job_name: appointments
+    static_configs:
+      - targets: ['appointments:4002']
+
+  - job_name: doctors
+    static_configs:
+      - targets: ['doctors:4003']
+
+  - job_name: payments
+    static_configs:
+      - targets: ['payments:4004']
+
+  - job_name: notifications
+    static_configs:
+      - targets: ['notifications:4005']
