@@ -12,6 +12,7 @@ import {
   cancelAppointment,
   completeAppointment,
   fetchAppointmentDetail,
+  fetchDoctorById,
   markAppointmentNoShow,
 } from '../lib/api';
 import { formatCents, formatDateTime } from '../lib/format';
@@ -28,22 +29,30 @@ const previewRefundCents = (appointment: AppointmentDetail): number => {
 
 export const AppointmentDetailPage = (): JSX.Element => {
   const { id } = useParams<{ id: string }>();
-  const { adminKey } = useAdminAuth();
+  const { accessToken } = useAdminAuth();
   const { showToast } = useToast();
   const navigate = useNavigate();
 
   const [appointment, setAppointment] = useState<AppointmentDetail | null>(null);
+  const [doctorName, setDoctorName] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [cancelReason, setCancelReason] = useState('');
   const [showCancelModal, setShowCancelModal] = useState(false);
 
   const loadDetail = (): void => {
-    if (!adminKey || !id) return;
+    if (!accessToken || !id) return;
     setIsLoading(true);
 
-    fetchAppointmentDetail(adminKey, id)
-      .then((result) => setAppointment(result.appointment))
+    fetchAppointmentDetail(accessToken, id)
+      .then(async (result) => {
+        setAppointment(result.appointment);
+        // Appointments no tiene el nombre del doctor (RFC-001 decisión 5) —
+        // una sola consulta extra a Doctors está bien para el detalle
+        // (ADR-001), distinto de la lista donde sería N+1.
+        const doctor = await fetchDoctorById(result.appointment.doctorId).catch(() => null);
+        setDoctorName(doctor?.name ?? null);
+      })
       .catch((error: unknown) => {
         const message = error instanceof ApiError ? error.message : 'No se pudo cargar la cita';
         showToast(message, 'error');
@@ -55,7 +64,7 @@ export const AppointmentDetailPage = (): JSX.Element => {
   useEffect(() => {
     loadDetail();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [adminKey, id]);
+  }, [accessToken, id]);
 
   if (isLoading || !appointment) {
     return (
@@ -70,10 +79,10 @@ export const AppointmentDetailPage = (): JSX.Element => {
   const canMarkNoShow = appointment.status === 'REMINDED';
 
   const handleComplete = async (): Promise<void> => {
-    if (!adminKey || !id) return;
+    if (!accessToken || !id) return;
     setIsSubmitting(true);
     try {
-      await completeAppointment(adminKey, id);
+      await completeAppointment(accessToken, id);
       showToast('Cita marcada como completada', 'success');
       loadDetail();
     } catch (error) {
@@ -85,10 +94,10 @@ export const AppointmentDetailPage = (): JSX.Element => {
   };
 
   const handleNoShow = async (): Promise<void> => {
-    if (!adminKey || !id) return;
+    if (!accessToken || !id) return;
     setIsSubmitting(true);
     try {
-      await markAppointmentNoShow(adminKey, id);
+      await markAppointmentNoShow(accessToken, id);
       showToast('Cita marcada como no-show', 'success');
       loadDetail();
     } catch (error) {
@@ -100,10 +109,10 @@ export const AppointmentDetailPage = (): JSX.Element => {
   };
 
   const handleConfirmCancel = async (): Promise<void> => {
-    if (!adminKey || !id || cancelReason.trim().length === 0) return;
+    if (!accessToken || !id || cancelReason.trim().length === 0) return;
     setIsSubmitting(true);
     try {
-      const result = await cancelAppointment(adminKey, id, cancelReason.trim());
+      const result = await cancelAppointment(accessToken, id, cancelReason.trim());
       showToast(`Cita cancelada. Reembolso: ${formatCents(result.refundAmountCents)}`, 'success');
       setShowCancelModal(false);
       setCancelReason('');
@@ -133,7 +142,7 @@ export const AppointmentDetailPage = (): JSX.Element => {
         <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
           <div>
             <p className="text-xs text-black-600">Doctor</p>
-            <p className="text-sm text-black-900">{appointment.doctor.name}</p>
+            <p className="text-sm text-black-900">{doctorName ?? appointment.doctorId}</p>
           </div>
           <div>
             <p className="text-xs text-black-600">Fecha y hora</p>

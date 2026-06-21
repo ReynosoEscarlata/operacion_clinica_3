@@ -1,0 +1,80 @@
+name: CI - auth
+
+on:
+  push:
+    branches: ['**']
+    paths:
+      - 'services/auth/**'
+      - 'packages/contracts/auth/**'
+      # Contract test (Pact, PLAN.md Fase 4): ver nota equivalente en
+      # doctors-ci.yml.
+      - 'pacts/gateway-auth.json'
+      - 'tsconfig.base.json'
+      - '.github/workflows/auth-ci.yml'
+  pull_request:
+    branches: ['**']
+    paths:
+      - 'services/auth/**'
+      - 'packages/contracts/auth/**'
+      # Contract test (Pact, PLAN.md Fase 4): ver nota equivalente en
+      # doctors-ci.yml.
+      - 'pacts/gateway-auth.json'
+      - 'tsconfig.base.json'
+      - '.github/workflows/auth-ci.yml'
+
+defaults:
+  run:
+    working-directory: services/auth
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: auth
+          POSTGRES_PASSWORD: auth
+          POSTGRES_DB: auth_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U auth"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      NODE_ENV: test
+      PORT: 4001
+      LOG_LEVEL: silent
+      DATABASE_URL: postgresql://auth:auth@localhost:5432/auth_db?schema=public
+      REDIS_URL: redis://localhost:6379
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Generate Prisma Client
+        run: npm run prisma:generate
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Apply migrations
+        run: npx prisma migrate deploy
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm run test

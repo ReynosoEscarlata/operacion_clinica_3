@@ -20,5 +20,21 @@ module.exports = {
     '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_' }],
     'no-console': 'error',
   },
-  ignorePatterns: ['dist', 'node_modules', 'coverage', 'vitest.config.ts', '.eslintrc.cjs', 'admin'],
+  // services/, gateway/ y packages/ tienen su propio .eslintrc.cjs, tsconfig
+  // y pipeline de CI independiente (ver Challenge 4 / PLAN.md Fase 1) — el
+  // lint del monolito no debe entrar ahí, igual que su CI ya está acotado
+  // por `paths:` a su propio código.
+  ignorePatterns: [
+    'dist',
+    'node_modules',
+    'coverage',
+    'vitest.config.ts',
+    '.eslintrc.cjs',
+    'admin',
+    'services',
+    'gateway',
+    'packages',
+    'scripts',
+    'pacts',
+  ],
 };

@@ -1,0 +1,90 @@
+openapi: 3.1.0
+info:
+  title: Notifications API
+  version: "1.0.0"
+  description: >
+    Servicio dirigido por eventos (consumer group de Redis Streams). Su
+    superficie HTTP es mínima a propósito: la mayor parte del trabajo ocurre
+    al consumir eventos de Appointments/Doctors, nunca al ser invocado
+    síncronamente (regla central del plan: Appointments nunca depende de
+    Notifications para responder una request).
+    Mantiene su propio read-model (AppointmentSnapshot, PatientSnapshot,
+    DoctorSnapshot) poblado por los eventos que consume — ver RFC-001
+    decisión 4.
+servers:
+  - url: /v1
+
+paths:
+  /dead-letter:
+    get:
+      summary: Listar notificaciones que agotaron reintentos
+      operationId: listDeadLetter
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Listado de jobs en dead-letter
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/DeadLetterEntry" }
+
+  /health:
+    get:
+      summary: Health check (incluye lag del consumer group)
+      operationId: getHealth
+      responses:
+        "200":
+          description: Estado del servicio y lag de consumo
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, enum: [ok, degraded] }
+                  consumerLag: { type: integer, description: "Eventos pendientes de procesar en el stream" }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    DeadLetterEntry:
+      type: object
+      required: [id, eventType, appointmentId, failedAt, error]
+      properties:
+        id: { type: string, format: uuid }
+        eventType: { type: string }
+        appointmentId: { type: string, format: uuid, nullable: true }
+        failedAt: { type: string, format: date-time }
+        error: { type: string }
+
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message, requestId]
+          properties:
+            code: { type: string }
+            message: { type: string }
+            requestId: { type: string, format: uuid }
+
+# --- Este servicio no publica eventos de dominio propios: su salida es
+# efecto observable (emails enviados), no estado que otros servicios
+# necesiten reaccionar a través de eventos. Si SMS u otro canal necesitara
+# notificar a otro servicio, se documentaría aquí un evento nuevo.
+x-events-published: []
+x-events-consumed:
+  - AppointmentCreated
+  - AppointmentStatusChanged
+  - PatientUpdated
+  - DoctorCreated
+  - DoctorUpdated

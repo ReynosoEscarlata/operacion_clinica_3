@@ -1,0 +1,72 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Read-model propio (RFC-001 decisión 4): Notifications no consulta la BD
+// de Appointments/Doctors — reconstruye lo que necesita a partir de los
+// eventos que consume (AppointmentCreated/StatusChanged, PatientUpdated,
+// DoctorCreated/Updated). Solo se guardan los campos que realmente se usan
+// para armar los emails, no una copia completa de cada entidad.
+model AppointmentSnapshot {
+  id          String   @id @db.Uuid
+  patientId   String   @db.Uuid
+  doctorId    String   @db.Uuid
+  dateTime    DateTime
+  amountCents Int      @default(0)
+  status      String
+  updatedAt   DateTime @updatedAt
+}
+
+model PatientSnapshot {
+  id        String   @id @db.Uuid
+  email     String
+  name      String
+  updatedAt DateTime @updatedAt
+}
+
+// Todavía no se reciben eventos reales de Doctors (sigue siendo un
+// esqueleto sin lógica de negocio) — el modelo queda listo para cuando
+// Doctors se extraiga de verdad. Hasta entonces los emails usan un
+// fallback genérico en vez del nombre del doctor (ver notification.service.ts).
+model DoctorSnapshot {
+  id        String   @id @db.Uuid
+  name      String
+  specialty String
+  updatedAt DateTime @updatedAt
+}
+
+// Auditoría de envíos (éxito y fallo) — equivalente al AppointmentEvent
+// EMAIL_SENT/EMAIL_FAILED del monolito, pero en la BD propia de
+// Notifications (cero estado compartido).
+model NotificationLog {
+  id            String   @id @default(uuid()) @db.Uuid
+  appointmentId String   @db.Uuid
+  channel       String
+  type          String
+  status        String
+  error         String?
+  createdAt     DateTime @default(now())
+
+  @@index([appointmentId])
+}
+
+// Dead-letter para eventos de dominio que fallaron de forma permanente al
+// procesarse (ej. error de Resend agotando reintentos). Resuelve el gap
+// documentado en SPEC.md: sin esto, un evento "venenoso" se queda
+// reintentando para siempre en la Pending Entries List de Redis Streams.
+model DeadLetterEntry {
+  id          String   @id @default(uuid()) @db.Uuid
+  eventId     String
+  eventType   String
+  payload     Json
+  error       String
+  attempts    Int      @default(1)
+  failedAt    DateTime @default(now())
+
+  @@index([eventType])
+}

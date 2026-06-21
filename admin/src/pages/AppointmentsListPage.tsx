@@ -41,7 +41,7 @@ const buildQueryString = (filters: Filters, cursor: string | null): string => {
 };
 
 export const AppointmentsListPage = (): JSX.Element => {
-  const { adminKey } = useAdminAuth();
+  const { accessToken } = useAdminAuth();
   const { showToast } = useToast();
   const navigate = useNavigate();
 
@@ -62,12 +62,12 @@ export const AppointmentsListPage = (): JSX.Element => {
   }, []);
 
   useEffect(() => {
-    if (!adminKey) return;
+    if (!accessToken) return;
 
     let isMounted = true;
     setIsLoading(true);
 
-    fetchAppointments(adminKey, buildQueryString(filters, currentCursor))
+    fetchAppointments(accessToken, buildQueryString(filters, currentCursor))
       .then((result) => {
         if (!isMounted) return;
         setItems(result.items);
@@ -85,7 +85,7 @@ export const AppointmentsListPage = (): JSX.Element => {
       isMounted = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [adminKey, filters, currentCursor]);
+  }, [accessToken, filters, currentCursor]);
 
   const updateFilter = <K extends keyof Filters>(key: K, value: Filters[K]): void => {
     setFilters((current) => ({ ...current, [key]: value }));
@@ -100,9 +100,11 @@ export const AppointmentsListPage = (): JSX.Element => {
     setCursorStack((stack) => (stack.length > 1 ? stack.slice(0, -1) : stack));
   };
 
+  const doctorNameById = new Map(doctors.map((doctor) => [doctor.id, doctor.name]));
+
   const columns: Array<DataTableColumn<AppointmentListItem>> = [
     { header: 'Paciente', render: (row) => row.patient.name },
-    { header: 'Doctor', render: (row) => row.doctor.name },
+    { header: 'Doctor', render: (row) => doctorNameById.get(row.doctorId) ?? row.doctorId },
     { header: 'Fecha/hora', render: (row) => formatDateTime(row.dateTime) },
     { header: 'Status', render: (row) => <StatusBadge status={row.status} /> },
     {

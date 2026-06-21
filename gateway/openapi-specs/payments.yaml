@@ -1,0 +1,239 @@
+openapi: 3.1.0
+info:
+  title: Payments API
+  version: "1.0.0"
+  description: >
+    Integración con Stripe: creación de PaymentIntents, refunds y recepción
+    de webhooks (ver RFC-001 decisión 3: Payments es un servicio separado
+    desde esta fase). El resultado de un pago/refund se propaga a
+    Appointments como evento asíncrono, nunca como respuesta síncrona al
+    webhook (ver ADR-001).
+servers:
+  - url: /v1
+
+paths:
+  /customers:
+    post:
+      summary: Crear un Stripe Customer para un paciente
+      operationId: createCustomer
+      description: >
+        Agregado al extraer Patients (sub-dominio de Appointments, ver
+        RFC-001): Patients ya no llama a Stripe directamente — Payments es
+        el único dueño de la integración Stripe (RFC-001 decisión 3),
+        incluyendo la creación de customers, no solo PaymentIntents/refunds.
+        Llamado síncronamente porque el `stripeCustomerId` se persiste en la
+        misma respuesta de creación del paciente.
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, name]
+              properties:
+                email: { type: string, format: email }
+                name: { type: string }
+      responses:
+        "201":
+          description: Stripe Customer creado
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id]
+                properties:
+                  id: { type: string }
+        "502":
+          description: Stripe no disponible
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /payment-intents:
+    post:
+      summary: Crear un PaymentIntent para una cita
+      operationId: createPaymentIntent
+      description: >
+        Llamado síncronamente por Appointments al crear una cita (ADR-001:
+        el paciente necesita el clientSecret en la misma respuesta HTTP).
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [appointmentId, amountCents, patientStripeCustomerId]
+              properties:
+                appointmentId: { type: string, format: uuid }
+                amountCents: { type: integer, minimum: 0 }
+                patientStripeCustomerId: { type: string }
+      responses:
+        "201":
+          description: PaymentIntent creado
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PaymentIntent" }
+        "502":
+          description: Stripe no disponible
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /payment-intents/{id}/cancel:
+    post:
+      summary: Cancelar un PaymentIntent sin cobrar
+      operationId: cancelPaymentIntent
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: PaymentIntent cancelado
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PaymentIntent" }
+
+  /refunds:
+    post:
+      summary: Emitir un refund (completo o parcial)
+      operationId: createRefund
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [paymentIntentId, amountCents, appointmentId]
+              properties:
+                paymentIntentId: { type: string }
+                amountCents: { type: integer, minimum: 0 }
+                appointmentId: { type: string, format: uuid }
+      responses:
+        "201":
+          description: Refund creado. Publica evento RefundIssued.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Refund" }
+
+  /webhooks/stripe:
+    post:
+      summary: Receptor de webhooks de Stripe
+      operationId: handleStripeWebhook
+      description: >
+        Idempotente por stripeEventId (tabla WebhookEvent, patrón obligatorio
+        según CLAUDE.md). Tras procesar, publica PaymentSucceeded o
+        PaymentFailed vía Outbox (ver ADR-002) — Appointments lo consume
+        de forma asíncrona, nunca recibe la confirmación dentro de la misma
+        request del webhook.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        "200":
+          description: Webhook procesado (o ya procesado anteriormente, idempotente)
+        "401":
+          description: Firma de webhook inválida
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    PaymentIntentStatus:
+      type: string
+      enum: [REQUIRES_PAYMENT, SUCCEEDED, FAILED, CANCELLED]
+
+    PaymentIntent:
+      type: object
+      required: [id, appointmentId, amountCents, status, clientSecret]
+      properties:
+        id: { type: string }
+        appointmentId: { type: string, format: uuid }
+        amountCents: { type: integer }
+        status: { $ref: "#/components/schemas/PaymentIntentStatus" }
+        clientSecret: { type: string }
+
+    Refund:
+      type: object
+      required: [id, paymentIntentId, appointmentId, amountCents, status]
+      properties:
+        id: { type: string }
+        paymentIntentId: { type: string }
+        appointmentId: { type: string, format: uuid }
+        amountCents: { type: integer }
+        status: { type: string, enum: [PENDING, SUCCEEDED, FAILED] }
+
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message, requestId]
+          properties:
+            code: { type: string }
+            message: { type: string }
+            requestId: { type: string, format: uuid }
+
+    # --- Eventos publicados por Payments (vía Outbox, ver ADR-002) ---
+    PaymentSucceededEvent:
+      type: object
+      required: [eventId, eventType, occurredAt, data]
+      properties:
+        eventId: { type: string, format: uuid }
+        eventType: { type: string, const: "PaymentSucceeded" }
+        occurredAt: { type: string, format: date-time }
+        data:
+          type: object
+          required: [appointmentId, paymentIntentId, amountCents]
+          properties:
+            appointmentId: { type: string, format: uuid }
+            paymentIntentId: { type: string }
+            amountCents: { type: integer }
+
+    PaymentFailedEvent:
+      type: object
+      required: [eventId, eventType, occurredAt, data]
+      properties:
+        eventId: { type: string, format: uuid }
+        eventType: { type: string, const: "PaymentFailed" }
+        occurredAt: { type: string, format: date-time }
+        data:
+          type: object
+          required: [appointmentId, paymentIntentId, reason]
+          properties:
+            appointmentId: { type: string, format: uuid }
+            paymentIntentId: { type: string }
+            reason: { type: string }
+
+    RefundIssuedEvent:
+      type: object
+      required: [eventId, eventType, occurredAt, data]
+      properties:
+        eventId: { type: string, format: uuid }
+        eventType: { type: string, const: "RefundIssued" }
+        occurredAt: { type: string, format: date-time }
+        data:
+          type: object
+          required: [appointmentId, refundId, amountCents]
+          properties:
+            appointmentId: { type: string, format: uuid }
+            refundId: { type: string }
+            amountCents: { type: integer }
+
+x-events-published:
+  - PaymentSucceeded
+  - PaymentFailed
+  - RefundIssued
+x-events-consumed: []

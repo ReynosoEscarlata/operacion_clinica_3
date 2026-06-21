@@ -4,22 +4,22 @@ import { useAdminAuth } from '../context/AdminAuthContext';
 import { useToast } from '../context/ToastContext';
 
 export const AdminKeyGate = ({ children }: { children: ReactNode }): JSX.Element => {
-  const { adminKey, isAuthenticating, login } = useAdminAuth();
+  const { accessToken, isAuthenticating, login } = useAdminAuth();
   const { showToast } = useToast();
-  const [keyInput, setKeyInput] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
 
-  if (adminKey) {
+  if (accessToken) {
     return <>{children}</>;
   }
 
   const handleSubmit = async (event: FormEvent): Promise<void> => {
     event.preventDefault();
-    const trimmedKey = keyInput.trim();
-    if (!trimmedKey) return;
+    if (!email.trim() || !password) return;
 
-    const success = await login(trimmedKey);
+    const success = await login(email.trim(), password);
     if (!success) {
-      showToast('La API key ingresada es incorrecta', 'error');
+      showToast('Email o contraseña incorrectos', 'error');
     }
   };
 
@@ -30,24 +30,36 @@ export const AdminKeyGate = ({ children }: { children: ReactNode }): JSX.Element
         className="w-full max-w-sm rounded-modal bg-white p-8 shadow-sm"
       >
         <h1 className="text-lg font-semibold text-black-900">Clínica — Panel administrativo</h1>
-        <p className="mt-1 text-sm text-black-600">Ingresá la API key de administrador para continuar.</p>
+        <p className="mt-1 text-sm text-black-600">Ingresá con tu cuenta de staff o admin para continuar.</p>
 
-        <label htmlFor="admin-key" className="mt-6 block text-sm font-medium text-black-900">
-          API key
+        <label htmlFor="email" className="mt-6 block text-sm font-medium text-black-900">
+          Email
         </label>
         <input
-          id="admin-key"
-          type="password"
+          id="email"
+          type="email"
           autoFocus
-          value={keyInput}
-          onChange={(event) => setKeyInput(event.target.value)}
+          value={email}
+          onChange={(event) => setEmail(event.target.value)}
+          className="mt-2 w-full rounded-btn border border-black-300 px-3 py-2 text-sm text-black-900 focus:border-blue-500 focus:outline-none"
+          placeholder="admin@clinica.test"
+        />
+
+        <label htmlFor="password" className="mt-4 block text-sm font-medium text-black-900">
+          Contraseña
+        </label>
+        <input
+          id="password"
+          type="password"
+          value={password}
+          onChange={(event) => setPassword(event.target.value)}
           className="mt-2 w-full rounded-btn border border-black-300 px-3 py-2 text-sm text-black-900 focus:border-blue-500 focus:outline-none"
           placeholder="••••••••"
         />
 
         <button
           type="submit"
-          disabled={isAuthenticating || keyInput.trim().length === 0}
+          disabled={isAuthenticating || !email.trim() || !password}
           className="mt-6 w-full rounded-btn bg-blue-500 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
         >
           {isAuthenticating ? 'Verificando…' : 'Entrar'}

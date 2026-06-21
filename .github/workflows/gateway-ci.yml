@@ -1,0 +1,54 @@
+name: CI - gateway
+
+on:
+  push:
+    branches: ['**']
+    paths:
+      - 'gateway/**'
+      - 'tsconfig.base.json'
+      - '.github/workflows/gateway-ci.yml'
+  pull_request:
+    branches: ['**']
+    paths:
+      - 'gateway/**'
+      - 'tsconfig.base.json'
+      - '.github/workflows/gateway-ci.yml'
+
+defaults:
+  run:
+    working-directory: gateway
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+    env:
+      NODE_ENV: test
+      PORT: 4000
+      LOG_LEVEL: silent
+      AUTH_JWKS_URL: http://localhost:4001/v1/auth/.well-known/jwks.json
+      AUTH_SERVICE_URL: http://localhost:4001
+      APPOINTMENTS_SERVICE_URL: http://localhost:4002
+      DOCTORS_SERVICE_URL: http://localhost:4003
+      PAYMENTS_SERVICE_URL: http://localhost:4004
+      NOTIFICATIONS_SERVICE_URL: http://localhost:4005
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm run test

@@ -1,0 +1,92 @@
+name: CI - doctors
+
+on:
+  push:
+    branches: ['**']
+    paths:
+      - 'services/doctors/**'
+      - 'packages/contracts/doctors/**'
+      # Contract test (Pact, PLAN.md Fase 4): si Appointments cambia lo que
+      # espera de Doctors, commitea un pact nuevo acá — sin este path el
+      # CI de doctors no se dispara y la verificación queda desactualizada.
+      - 'pacts/appointments-doctors.json'
+      - 'tsconfig.base.json'
+      - '.github/workflows/doctors-ci.yml'
+  pull_request:
+    branches: ['**']
+    paths:
+      - 'services/doctors/**'
+      - 'packages/contracts/doctors/**'
+      # Contract test (Pact, PLAN.md Fase 4): si Appointments cambia lo que
+      # espera de Doctors, commitea un pact nuevo acá — sin este path el
+      # CI de doctors no se dispara y la verificación queda desactualizada.
+      - 'pacts/appointments-doctors.json'
+      - 'tsconfig.base.json'
+      - '.github/workflows/doctors-ci.yml'
+
+defaults:
+  run:
+    working-directory: services/doctors
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: doctors
+          POSTGRES_PASSWORD: doctors
+          POSTGRES_DB: doctors_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U doctors"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      NODE_ENV: test
+      PORT: 4003
+      LOG_LEVEL: silent
+      DATABASE_URL: postgresql://doctors:doctors@localhost:5432/doctors_db?schema=public
+      REDIS_URL: redis://localhost:6379
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Generate Prisma Client
+        run: npm run prisma:generate
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Apply migrations
+        run: npx prisma migrate deploy
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm run test

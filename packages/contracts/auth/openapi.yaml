@@ -1,0 +1,239 @@
+openapi: 3.1.0
+info:
+  title: Auth API
+  version: "1.0.0"
+  description: >
+    Autenticación y gestión de usuarios Admin/Staff. Los pacientes NO tienen
+    cuenta ni login (ver RFC-001-bounded-contexts.md, decisión 1) — este
+    servicio solo cubre identidades que acceden al panel administrativo.
+    Publica eventos de dominio que otros servicios consumen para mantener
+    sus propios read-models (ver ADR-002).
+servers:
+  - url: /v1
+    description: Versión actual. Ver ADR-003-versionado-apis.md para política de versionado.
+
+paths:
+  /auth/login:
+    post:
+      summary: Login de usuario Admin/Staff
+      operationId: login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { type: string, format: email }
+                password: { type: string, minLength: 8 }
+      responses:
+        "200":
+          description: Login exitoso
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [accessToken, refreshToken, expiresIn]
+                properties:
+                  accessToken: { type: string, description: "JWT firmado con la llave privada de Auth" }
+                  refreshToken: { type: string }
+                  expiresIn: { type: integer, description: "TTL del accessToken en segundos (corto, ej. 900)" }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /auth/refresh:
+    post:
+      summary: Renovar accessToken usando un refreshToken válido
+      operationId: refreshToken
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refreshToken]
+              properties:
+                refreshToken: { type: string }
+      responses:
+        "200":
+          description: Nuevo accessToken emitido
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [accessToken, expiresIn]
+                properties:
+                  accessToken: { type: string }
+                  expiresIn: { type: integer }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /auth/.well-known/jwks.json:
+    get:
+      summary: Llave pública (JWKS) para verificación stateless de JWT por otros servicios
+      operationId: getJwks
+      description: >
+        Appointments, Doctors, Payments y Notifications consumen este endpoint
+        (cacheado) para verificar la firma de los JWT sin consultar la BD de
+        Auth — ver RFC-001 decisión 2 (JWT stateless).
+      responses:
+        "200":
+          description: JSON Web Key Set
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  keys:
+                    type: array
+                    items: { type: object }
+
+  /users:
+    post:
+      summary: Crear usuario Admin/Staff
+      operationId: createUser
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, name, role, password]
+              properties:
+                email: { type: string, format: email }
+                name: { type: string }
+                role: { $ref: "#/components/schemas/UserRole" }
+                password: { type: string, minLength: 8 }
+      responses:
+        "201":
+          description: Usuario creado
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/User" }
+        "409":
+          description: Email ya registrado
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+    get:
+      summary: Listar usuarios Admin/Staff
+      operationId: listUsers
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Listado paginado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/User" }
+
+  /users/{id}/deactivate:
+    patch:
+      summary: Desactivar usuario (revoca acceso)
+      operationId: deactivateUser
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Usuario desactivado. Publica evento UserDeactivated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/User" }
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    UserRole:
+      type: string
+      enum: [ADMIN, STAFF]
+
+    User:
+      type: object
+      required: [id, email, name, role, active, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        email: { type: string, format: email }
+        name: { type: string }
+        role: { $ref: "#/components/schemas/UserRole" }
+        active: { type: boolean }
+        createdAt: { type: string, format: date-time }
+
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message, requestId]
+          properties:
+            code: { type: string, example: "UNAUTHORIZED" }
+            message: { type: string }
+            requestId: { type: string, format: uuid }
+
+    # --- Esquemas de eventos publicados por Auth (Redis Streams) ---
+    # No son endpoints HTTP. Se documentan aquí porque son parte del contrato
+    # público del servicio (ver ADR-001 y ADR-002). Versionan independiente
+    # de las rutas HTTP, ver ADR-003.
+    UserCreatedEvent:
+      type: object
+      description: Publicado cuando se crea un usuario Admin/Staff.
+      required: [eventId, eventType, occurredAt, data]
+      properties:
+        eventId: { type: string, format: uuid }
+        eventType: { type: string, const: "UserCreated" }
+        occurredAt: { type: string, format: date-time }
+        data:
+          type: object
+          required: [userId, email, role]
+          properties:
+            userId: { type: string, format: uuid }
+            email: { type: string, format: email }
+            role: { $ref: "#/components/schemas/UserRole" }
+
+    UserDeactivatedEvent:
+      type: object
+      description: Publicado cuando se desactiva un usuario (para invalidar accesos).
+      required: [eventId, eventType, occurredAt, data]
+      properties:
+        eventId: { type: string, format: uuid }
+        eventType: { type: string, const: "UserDeactivated" }
+        occurredAt: { type: string, format: date-time }
+        data:
+          type: object
+          required: [userId]
+          properties:
+            userId: { type: string, format: uuid }
+
+  responses:
+    Unauthorized:
+      description: Credenciales inválidas o token inválido/expirado
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    NotFound:
+      description: Recurso no encontrado
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+
+x-events-published:
+  - UserCreated
+  - UserDeactivated
+x-events-consumed: []

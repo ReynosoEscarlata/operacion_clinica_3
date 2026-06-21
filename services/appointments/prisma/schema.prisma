@@ -1,0 +1,118 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum AppointmentStatus {
+  PENDING
+  CONFIRMED
+  PAID
+  REMINDED
+  COMPLETED
+  CANCELLED
+  NO_SHOW
+}
+
+// Subconjunto relevante dentro del bounded context de Appointments. Tipos
+// como EMAIL_SENT/EMAIL_FAILED quedaron en Notifications; WEBHOOK_RECEIVED
+// quedó en Payments. PAYMENT_RECEIVED/PAYMENT_FAILED se mantienen porque
+// Appointments necesita registrar el efecto de esos eventos en su propio
+// timeline, aunque la fuente del evento ahora sea Payments (consumido vía
+// Outbox/Redis Streams en la Fase 3 del plan).
+enum EventType {
+  CREATED
+  STATUS_CHANGED
+  PAYMENT_RECEIVED
+  PAYMENT_FAILED
+  CANCELLED
+  REMINDER_SENT
+}
+
+// Patients es sub-dominio de Appointments (RFC-001: no se extrae como
+// servicio propio en esta fase — no tiene identidad de auth ni ciclo de
+// vida independiente de la cita).
+model Patient {
+  id               String   @id @default(uuid()) @db.Uuid
+  email            String   @unique
+  name             String
+  phone            String
+  stripeCustomerId String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  appointments Appointment[]
+}
+
+model Appointment {
+  id                    String            @id @default(uuid()) @db.Uuid
+  patientId             String            @db.Uuid
+  doctorId              String            @db.Uuid
+  dateTime              DateTime
+  durationMinutes       Int               @default(30)
+  amountCents           Int               @default(0)
+  status                AppointmentStatus @default(PENDING)
+  cancellationReason    String?
+  stripePaymentIntentId String?           @unique
+  confirmedAt           DateTime?
+  paidAt                DateTime?
+  remindedAt            DateTime?
+  completedAt           DateTime?
+  cancelledAt           DateTime?
+  noShowAt              DateTime?
+  createdAt             DateTime          @default(now())
+  updatedAt             DateTime          @updatedAt
+
+  patient Patient            @relation(fields: [patientId], references: [id], onDelete: Restrict)
+  events  AppointmentEvent[]
+
+  @@index([status])
+  @@index([dateTime])
+  @@index([doctorId, dateTime])
+}
+
+model AppointmentEvent {
+  id            String      @id @default(uuid()) @db.Uuid
+  appointmentId String      @db.Uuid
+  type          EventType
+  payload       Json
+  createdAt     DateTime    @default(now())
+
+  appointment Appointment @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+
+  @@index([appointmentId])
+}
+
+// Outbox (ADR-002): AppointmentCreated se escribe en la misma transacción
+// que la cita (PLAN.md Fase 2, paso 2, explícito). AppointmentStatusChanged
+// se escribe en cada transición de la state machine. PatientUpdated se
+// escribe al actualizar datos de un paciente. El relay a Redis Streams es
+// Fase 3.
+model OutboxEvent {
+  id          String    @id @default(uuid()) @db.Uuid
+  type        String
+  payload     Json
+  publishedAt DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@index([publishedAt])
+}
+
+// Dead-letter para eventos de dominio consumidos (PaymentSucceeded/
+// PaymentFailed) que fallaron de forma permanente al procesarse — resuelve
+// el gap documentado en SPEC.md: sin esto, un evento "venenoso" se queda
+// reintentando para siempre en la Pending Entries List de Redis Streams.
+model DeadLetterEntry {
+  id        String   @id @default(uuid()) @db.Uuid
+  eventId   String
+  eventType String
+  payload   Json
+  error     String
+  attempts  Int      @default(1)
+  failedAt  DateTime @default(now())
+
+  @@index([eventType])
+}

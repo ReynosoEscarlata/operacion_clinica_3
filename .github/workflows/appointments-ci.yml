@@ -1,0 +1,94 @@
+name: CI - appointments
+
+on:
+  push:
+    branches: ['**']
+    paths:
+      - 'services/appointments/**'
+      - 'packages/contracts/appointments/**'
+      # Contract test de mensajes (Pact, PLAN.md Fase 4): Appointments es el
+      # provider/productor del evento — si Notifications cambia lo que
+      # espera, commitea un pact nuevo acá.
+      - 'pacts/notifications-appointments.json'
+      - 'tsconfig.base.json'
+      - '.github/workflows/appointments-ci.yml'
+  pull_request:
+    branches: ['**']
+    paths:
+      - 'services/appointments/**'
+      - 'packages/contracts/appointments/**'
+      # Contract test de mensajes (Pact, PLAN.md Fase 4): Appointments es el
+      # provider/productor del evento — si Notifications cambia lo que
+      # espera, commitea un pact nuevo acá.
+      - 'pacts/notifications-appointments.json'
+      - 'tsconfig.base.json'
+      - '.github/workflows/appointments-ci.yml'
+
+defaults:
+  run:
+    working-directory: services/appointments
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: appointments
+          POSTGRES_PASSWORD: appointments
+          POSTGRES_DB: appointments_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U appointments"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      NODE_ENV: test
+      PORT: 4002
+      LOG_LEVEL: silent
+      DATABASE_URL: postgresql://appointments:appointments@localhost:5432/appointments_db?schema=public
+      REDIS_URL: redis://localhost:6379
+      DOCTORS_SERVICE_URL: http://localhost:4003
+      PAYMENTS_SERVICE_URL: http://localhost:4004
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Generate Prisma Client
+        run: npm run prisma:generate
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Apply migrations
+        run: npx prisma migrate deploy
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm run test
