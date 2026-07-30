@@ -1,7 +1,7 @@
 # ADR-011: Identidad — Cognito user pool compartido vs. pool por tenant
 
 **Fecha:** 2026-07-29
-**Estado:** Propuesto — **PENDIENTE DE DECISIÓN HUMANA** (depende de ADR-005 y ADR-010)
+**Estado:** Aceptado (2026-07-29)
 **Decisor(es):** Ricardo Reynoso
 
 ## Contexto
@@ -40,15 +40,28 @@ ya está decidido por el plan maestro en la Fase 2, que este ADR no reabre).
 
 ## Decisión
 
-**PENDIENTE DE DECISIÓN HUMANA.**
+Elegimos la **Opción 1: un único user pool compartido**, incluyendo los roles de plataforma
+(`platform_admin`/`platform_support`) en el mismo pool que los roles de tenant, distinguidos por
+atributos/claims (no por pool separado). Ricardo priorizó explícitamente simplicidad operativa —
+un solo flujo de login, un solo pool que mantener — sobre el aislamiento adicional que daría un
+pool de plataforma separado (Opción 3), consistente con la misma priorización ya hecha en ADR-009.
 
 ## Consecuencias
 
-- **Positivas:** *(pendiente)*
-- **Negativas / tradeoffs:** *(pendiente)*
+- **Positivas:** un solo flujo de autenticación que implementar y mantener; consistente con el
+  modelo de tenancy "shared DB" de ADR-005 — mismo patrón aplicado a identidad.
+- **Negativas / tradeoffs:** un compromiso de credenciales o un bug en el trigger de
+  pre-token-generation que inyecta `tenant_id`/roles al JWT tiene, en principio, blast radius sobre
+  toda la plataforma **incluyendo las cuentas de plataforma** — no hay el límite físico adicional
+  que daría un pool separado para `platform_admin`/`platform_support`. Este riesgo se acepta
+  explícitamente; debe compensarse con controles más estrictos sobre esas cuentas específicas
+  (MFA obligatorio, políticas de contraseña reforzadas, alertas de acceso) ya que no hay aislamiento
+  de pool que las proteja.
 - **Cosas a monitorear:** el mismo riesgo que ya existe hoy con la llave JWT en memoria (amenaza
-  #19) se traslada, si se elige la Opción 1 o 3, a la configuración del trigger de
-  pre-token-generation — un bug ahí es equivalente en severidad.
+  #19 del threat model) se traslada aquí a la configuración del trigger de pre-token-generation —
+  un bug ahí es equivalente en severidad y ahora afecta también a las cuentas de plataforma; MFA y
+  controles reforzados para `platform_admin`/`platform_support` deben priorizarse en la Fase 4
+  como mitigación del trade-off aceptado en este ADR.
 
 ## Referencias
 - `docs/security/threat-model.md`, amenaza #1 y #19
