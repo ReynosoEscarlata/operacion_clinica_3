@@ -30,6 +30,15 @@ export interface DoctorRepository {
   create: (data: CreateDoctorData) => Promise<Doctor>;
   findById: (id: string) => Promise<DoctorWithAvailability | null>;
   exists: (id: string) => Promise<boolean>;
+  /**
+   * Lectura pública (igual que `exists`, sin `withTenant`) que además
+   * compara el tenantId del doctor -- no expone más de lo que ya es público
+   * (el directorio de doctores es de lectura libre), pero permite a las
+   * mutaciones (ver addAvailability en doctors.service.ts) rechazar con 404
+   * un intento de escribir sobre un doctor de OTRO tenant, sin depender
+   * únicamente de RLS del lado de escritura.
+   */
+  belongsToTenant: (id: string, tenantId: string) => Promise<boolean>;
   findBasicById: (id: string) => Promise<DoctorBasic | null>;
   findAll: () => Promise<Doctor[]>;
   addAvailability: (doctorId: string, block: AvailabilityBlockData) => Promise<Availability>;
@@ -77,6 +86,11 @@ export class PrismaDoctorRepository implements DoctorRepository {
   async exists(id: string): Promise<boolean> {
     const doctor = await this.prisma.doctor.findUnique({ where: { id }, select: { id: true } });
     return doctor !== null;
+  }
+
+  async belongsToTenant(id: string, tenantId: string): Promise<boolean> {
+    const doctor = await this.prisma.doctor.findUnique({ where: { id }, select: { tenantId: true } });
+    return doctor?.tenantId === tenantId;
   }
 
   async findBasicById(id: string): Promise<DoctorBasic | null> {

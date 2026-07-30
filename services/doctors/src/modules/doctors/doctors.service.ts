@@ -3,6 +3,7 @@ import type { Availability, Doctor } from '@prisma/client';
 import { AppError } from '../../lib/app-error.js';
 import type { Logger } from '../../lib/logger.js';
 import { generateSlotsForDate, slotToIsoDateTime } from '../../lib/slots.js';
+import { getTenantId } from '../../lib/tenant-context.js';
 import type { CreateDoctorDto, SetAvailabilityDto } from './doctors.schemas.js';
 import type { DoctorRepository, DoctorWithAvailability } from './doctors.repository.js';
 
@@ -102,8 +103,20 @@ export class DoctorService {
   }
 
   async addAvailability(doctorId: string, dto: SetAvailabilityDto): Promise<Availability> {
-    const exists = await this.repository.exists(doctorId);
-    if (!exists) {
+    // No basta con `exists()` (lectura pública, sin tenant): un actor de un
+    // tenant podría apuntar a un doctorId de OTRO tenant y, como
+    // `addAvailability` etiqueta la nueva fila con SU PROPIO tenantId (ver
+    // repository), terminaría inyectando disponibilidad ajena bajo su
+    // tenant en el horario público de un doctor que no le pertenece. Se
+    // verifica pertenencia explícitamente y se responde 404 (no 403) si no
+    // coincide, igual que si el doctor no existiera -- no se revela más de
+    // lo que el directorio público ya expone.
+    const tenantId = getTenantId();
+    if (!tenantId) {
+      throw new Error('addAvailability() llamado sin tenant en contexto');
+    }
+    const belongsToTenant = await this.repository.belongsToTenant(doctorId, tenantId);
+    if (!belongsToTenant) {
       throw new AppError(404, 'DOCTOR_NOT_FOUND', 'Doctor no encontrado');
     }
 
