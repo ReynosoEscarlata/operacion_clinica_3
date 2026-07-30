@@ -1,7 +1,7 @@
 # ADR-007: Compute (ECS Fargate vs. Lambda vs. híbrido)
 
 **Fecha:** 2026-07-29
-**Estado:** Propuesto — inclinación registrada, **PENDIENTE DE RATIFICACIÓN HUMANA**
+**Estado:** Aceptado (2026-07-29)
 **Decisor(es):** Ricardo Reynoso
 
 ## Contexto
@@ -42,8 +42,9 @@ invocación y tiene límite de duración) es fricción real, no gratuita.
 
 ## Decisión
 
-**PENDIENTE DE RATIFICACIÓN HUMANA.** Inclinación registrada en Fase 0: híbrido (Opción 3), sin
-objeción de Ricardo a los defaults del plan maestro.
+Elegimos la **Opción 3: híbrido** — Fargate para los 5 servicios existentes, Lambda para jobs
+programados y de bajo volumen (aprovisionamiento de tenant de la Fase 8, purga de retención de la
+Fase 5). Ratificada por Ricardo el 2026-07-29 sobre la inclinación de Fase 0.
 
 ## Consecuencias
 
