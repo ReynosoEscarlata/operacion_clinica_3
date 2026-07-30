@@ -62,6 +62,7 @@ jobs:
       PORT: 4003
       LOG_LEVEL: silent
       DATABASE_URL: postgresql://doctors:doctors@localhost:5432/doctors_db?schema=public
+      DATABASE_URL_APP: postgresql://app_role:app_role_dev_password@localhost:5432/doctors_db?schema=public
       REDIS_URL: redis://localhost:6379
 
     steps:

@@ -6,9 +6,10 @@ RFC-003-tenancy.md.
 
 ## Alcance
 
-Agregar `tenantId` a toda tabla de datos de tenant en los 5 servicios (`auth`, `appointments`,
-`doctors`, `payments`, `notifications`), habilitar Row Level Security, y separar el rol de
-aplicación (sin `BYPASSRLS`) del rol de migración (owner).
+Agregar `tenantId` a toda tabla de datos de tenant en 4 de los 5 servicios (`auth`, `appointments`,
+`doctors`, `payments`), habilitar Row Level Security, y separar el rol de aplicación (sin
+`BYPASSRLS`) del rol de migración (owner). `notifications` queda fuera del alcance de esta
+ejecución — ver sección "Notifications: diferido a Fase 3b" más abajo.
 
 ## Situación real de este proyecto (confirmada en Fase 0)
 
@@ -99,6 +100,33 @@ Si la migración de un servicio falla a mitad de camino:
 2. Revisar el `migration.sql` generado — el paso más frágil es el `UPDATE` de backfill si la tabla
    tiene muchas filas (no aplica hoy, con datos de prueba).
 3. Nunca reintentar un `ALTER COLUMN ... SET NOT NULL` sin antes confirmar `SELECT count(*) FROM x WHERE "tenantId" IS NULL` = 0.
+
+## Notifications: diferido a Fase 3b
+
+A diferencia de `auth`, `appointments`, `doctors` y `payments`, **`notifications` no recibió
+`tenantId`/RLS en esta ejecución (Fase 3a)**. Razón: todas sus tablas (`AppointmentSnapshot`,
+`PatientSnapshot`, `DoctorSnapshot`, `NotificationLog`, `DeadLetterEntry`) se pueblan
+exclusivamente a partir de los payloads que llegan por Redis Streams (`AppointmentCreated`,
+`AppointmentStatusChanged`, `PatientUpdated`, `DoctorCreated/Updated`, `PaymentFailed`) — y esos
+payloads **hoy no llevan `tenant_id`**. Agregar la columna ahora habría significado, o (a) dejarla
+NULL en el 100% de las filas hasta que la mensajería lo propague (RLS que no aísla nada, puro
+andamiaje), o (b) adelantar la propagación de `tenant_id` en los eventos — que es exactamente el
+alcance de ADR-014/Fase 3b (migración completa a SQS/SNS), no de esta sesión. Confirmado con
+Ricardo: se difiere `notifications` completo a Fase 3b, junto con el resto de la propagación de
+tenant en mensajería.
+
+**Pendiente para cuando se ejecute Fase 3b:**
+1. Los publishers (`AppointmentCreated`/`AppointmentStatusChanged` en Appointments,
+   `DoctorCreated`/`DoctorUpdated` en Doctors, `PaymentFailed` en Payments) deben incluir
+   `tenantId` en el payload del evento.
+2. `notifications` agrega `tenantId` (NOT NULL, sin caso de fila sin tenant — a diferencia de
+   Payments, aquí no hay ningún evento legítimamente "sin tenant") + RLS + `tenant-context.ts` +
+   `tenant-scoped.ts`, mismo molde que los demás servicios.
+3. El consumer (`server.ts`/`event-handlers.ts`) entra en `runWithTenant(payload.tenantId, ...)`
+   antes de invocar cada handler — mismo patrón que ya usa `appointments/src/server.ts` para
+   `PaymentSucceeded`/`PaymentFailed`.
+4. `dead-letter.repository.ts` sigue el patrón de `appointments/src/lib/dead-letter.repository.ts`
+   (tenantId explícito en `record()`, ambiental en `list`/`findById`/`remove`).
 
 ## Decisiones (confirmadas con Ricardo, 2026-07-30)
 

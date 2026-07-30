@@ -126,6 +126,7 @@ services:
       NODE_ENV: development
       PORT: 4001
       DATABASE_URL: postgresql://auth:auth@postgres-auth:5432/auth_db?schema=public
+      DATABASE_URL_APP: postgresql://app_role:app_role_dev_password@postgres-auth:5432/auth_db?schema=public
       REDIS_URL: redis://redis:6379
     ports:
       - '4001:4001'
@@ -142,6 +143,7 @@ services:
       NODE_ENV: development
       PORT: 4002
       DATABASE_URL: postgresql://appointments:appointments@postgres-appointments:5432/appointments_db?schema=public
+      DATABASE_URL_APP: postgresql://app_role:app_role_dev_password@postgres-appointments:5432/appointments_db?schema=public
       REDIS_URL: redis://redis:6379
       DOCTORS_SERVICE_URL: http://doctors:4003
       PAYMENTS_SERVICE_URL: http://payments:4004
@@ -160,6 +162,7 @@ services:
       NODE_ENV: development
       PORT: 4003
       DATABASE_URL: postgresql://doctors:doctors@postgres-doctors:5432/doctors_db?schema=public
+      DATABASE_URL_APP: postgresql://app_role:app_role_dev_password@postgres-doctors:5432/doctors_db?schema=public
       REDIS_URL: redis://redis:6379
     ports:
       - '4003:4003'
@@ -176,6 +179,7 @@ services:
       NODE_ENV: development
       PORT: 4004
       DATABASE_URL: postgresql://payments:payments@postgres-payments:5432/payments_db?schema=public
+      DATABASE_URL_APP: postgresql://app_role:app_role_dev_password@postgres-payments:5432/payments_db?schema=public
       REDIS_URL: redis://redis:6379
       STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-sk_test_dummy}
       STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-whsec_dummy}
