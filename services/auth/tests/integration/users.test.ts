@@ -11,7 +11,9 @@ import { withTenantId } from '../../src/lib/tenant-scoped.js';
 // `prisma` en este archivo necesita su propio contexto de tenant, igual que
 // el código de producción -- ver withTenantId más abajo).
 const TEST_TENANT_ID = '33333333-3333-3333-3333-333333333333';
-const TENANT_HEADERS = { 'x-internal-tenant-id': TEST_TENANT_ID };
+// role clinic_owner (RFC-004): tiene user:create/user:list/user:deactivate
+// en 'all' -- necesario ahora que /v1/users exige requirePermission().
+const TENANT_HEADERS = { 'x-internal-tenant-id': TEST_TENANT_ID, 'x-internal-user-role': 'clinic_owner' };
 
 describe('Users CRUD (integración con DB real)', () => {
   let app: FastifyInstance;
@@ -83,6 +85,18 @@ describe('Users CRUD (integración con DB real)', () => {
   it('no requiere tenant_id para login/refresh/jwks pero si para /v1/users', async () => {
     const response = await app.inject({ method: 'GET', url: '/v1/users' });
     expect(response.statusCode).toBe(401);
+  });
+
+  it('RFC-004: receptionist no tiene user:create -- 403 FORBIDDEN', async () => {
+    const response = await app.inject({
+      method: 'POST',
+      url: '/v1/users',
+      headers: { 'x-internal-tenant-id': TEST_TENANT_ID, 'x-internal-user-role': 'receptionist' },
+      payload: { email: `intento-${randomUUID()}@clinica.test`, name: 'Intento', role: 'RECEPTIONIST', password: 'super-secreta' },
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(response.json().error.code).toBe('FORBIDDEN');
   });
 
   it('desactiva el usuario y registra UserDeactivated', async () => {

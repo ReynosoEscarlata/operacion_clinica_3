@@ -24,11 +24,27 @@ export const registerAuthRoutes = (app: FastifyInstance, deps: AuthRoutesDeps = 
   const service = buildAuthService({ usersRepository, refreshTokenRepository, logger: defaultLogger });
   const controller = buildAuthController(service);
 
-  app.post('/v1/auth/login', { schema: { body: LoginBody } }, controller.login);
-  app.post('/v1/auth/refresh', { schema: { body: RefreshBody } }, controller.refresh);
+  // Públicas por diseño (RFC-004: auth:login/auth:refresh no son un permiso
+  // -- acceso anónimo): el actor todavía no está autenticado en el momento
+  // de llamarlas, y JWKS es la llave pública que hace falta para verificar
+  // cualquier JWT en primer lugar.
+  app.post(
+    '/v1/auth/login',
+    { schema: { body: LoginBody }, config: { authz: { public: true } } },
+    controller.login,
+  );
+  app.post(
+    '/v1/auth/refresh',
+    { schema: { body: RefreshBody }, config: { authz: { public: true } } },
+    controller.refresh,
+  );
 
-  app.get('/v1/auth/.well-known/jwks.json', async () => {
-    const { publicJwk } = await getSigningKeys();
-    return { keys: [publicJwk] };
-  });
+  app.get(
+    '/v1/auth/.well-known/jwks.json',
+    { config: { authz: { public: true } } },
+    async () => {
+      const { publicJwk } = await getSigningKeys();
+      return { keys: [publicJwk] };
+    },
+  );
 };

@@ -11,7 +11,9 @@ import { hashPassword } from '../../src/lib/password.js';
 import { withTenantId } from '../../src/lib/tenant-scoped.js';
 
 const TEST_TENANT_ID = '44444444-4444-4444-4444-444444444444';
-const TENANT_HEADERS = { 'x-internal-tenant-id': TEST_TENANT_ID };
+// role clinic_owner (RFC-004): tiene user:create/user:deactivate en 'all'
+// -- necesario ahora que /v1/users exige requirePermission().
+const TENANT_HEADERS = { 'x-internal-tenant-id': TEST_TENANT_ID, 'x-internal-user-role': 'clinic_owner' };
 
 describe('Login / refresh / JWKS (integración con DB real)', () => {
   let app: FastifyInstance;
