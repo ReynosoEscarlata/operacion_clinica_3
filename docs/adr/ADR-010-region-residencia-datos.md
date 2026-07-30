@@ -1,8 +1,7 @@
 # ADR-010: Región AWS y residencia de datos (LFPDPPP)
 
 **Fecha:** 2026-07-29
-**Estado:** Propuesto — inclinación registrada, **PENDIENTE DE RATIFICACIÓN HUMANA** (bloqueado
-por verificación de disponibilidad de servicios)
+**Estado:** Aceptado (2026-07-29)
 **Decisor(es):** Ricardo Reynoso
 
 ## Contexto
@@ -39,26 +38,28 @@ verificación de precios/disponibilidad).
 
 ## Decisión
 
-**PENDIENTE DE RATIFICACIÓN HUMANA**, condicionada a una verificación técnica previa.
-
-Inclinación registrada en Fase 0: `mx-central-1` si los servicios necesarios (particularmente
-Cognito, RDS con las tallas requeridas, ECS Fargate) están disponibles ahí. **Esta condición debe
-verificarse explícitamente antes de aceptar este ADR** — ver
-`docs/cost/precios-aws-consultados.md` para el resultado de esa verificación. Si Cognito u otro
-servicio crítico no está disponible en `mx-central-1`, la decisión pasa a ser explícita: datos en
-México, plano de identidad en otra región, documentado como transferencia en el aviso de
-privacidad — o, alternativamente, `us-east-1` con la justificación de compliance escrita
-(ver plan maestro, sección 2, D4).
+Elegimos la **Opción 1: `mx-central-1`**. La condición de la Fase 0 (verificar disponibilidad de
+Cognito, RDS y ECS Fargate) se cumplió: `docs/cost/precios-aws-consultados.md` confirma que los 11
+servicios investigados tienen SKU propio publicado en `mx-central-1`, y Cognito se lanzó ahí
+oficialmente en julio de 2025 (anuncio oficial citado en ese documento). No fue necesario el
+fallback a `us-east-1` para ningún componente. Ricardo ratificó el 2026-07-29, aceptando la
+recomendación de verificar en consola/Pricing Calculator antes del primer despliegue real (pricing
+publicado es evidencia fuerte pero no 100% concluyente de disponibilidad operativa completa, según
+la nota de esa misma investigación).
 
 ## Consecuencias
 
-- **Positivas:** *(pendiente de la verificación de disponibilidad)*
-- **Negativas / tradeoffs:** si se requiere el modelo híbrido (datos en México, identidad en otra
-  región), el aviso de privacidad (Fase 5) debe documentar esa transferencia explícitamente, con
-  su base legal.
-- **Cosas a monitorear:** anuncios de AWS sobre nuevos servicios disponibles en `mx-central-1` —
-  la fecha de revisión de este ADR debe ser explícita porque la disponibilidad de servicios en una
-  región nueva cambia con el tiempo.
+- **Positivas:** residencia de datos de salud en México desde el diseño, sin necesidad de
+  justificar transferencia internacional en el aviso de privacidad (Fase 5); alineado directo con
+  LFPDPPP.
+- **Negativas / tradeoffs:** `mx-central-1` es una región relativamente nueva de AWS — algunos
+  servicios de nicho (fuera de los 11 ya verificados) podrían no estar disponibles si el diseño los
+  necesitara más adelante; los precios en `mx-central-1` son ligeramente más altos que en
+  `us-east-1` en varios servicios (ej. ~5% más caro en Fargate, ver cost/precios-aws-consultados.md).
+- **Cosas a monitorear:** verificación operativa final en consola AWS antes del primer despliegue
+  real a `mx-central-1` (pendiente, no bloqueante para continuar el diseño); anuncios de AWS sobre
+  nuevos servicios en esta región, por si el diseño necesita algo no cubierto hoy. Fecha de
+  revisión sugerida: antes de la Fase 2 (fundación de infraestructura).
 
 ## Referencias
 - `docs/cost/precios-aws-consultados.md` (verificación de disponibilidad de servicios en
