@@ -78,7 +78,7 @@ describe('verifyJwt — token best-effort en rutas públicas', () => {
 
     await verifyJwt(request, reply);
 
-    expect(request.user).toEqual({ sub: 'user-1', role: 'ADMIN' });
+    expect(request.user).toEqual({ sub: 'user-1', role: 'ADMIN', tenantId: null });
     expect(sendMock).not.toHaveBeenCalled();
   });
 
