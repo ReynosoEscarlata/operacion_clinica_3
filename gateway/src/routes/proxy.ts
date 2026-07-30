@@ -39,6 +39,11 @@ export const registerProxyRoutes = async (app: FastifyInstance): Promise<void> =
         rewriteRequestHeaders: (request, headers) => ({
           ...headers,
           ...(request.user ? { 'x-internal-user-role': request.user.role } : {}),
+          // tenant_id nunca lo pone el cliente -- solo se reenvia si vino de
+          // un JWT verificado con ese claim (RFC-003). Un usuario de
+          // plataforma (tenantId null) no reenvia el header en absoluto,
+          // igual que un request sin JWT.
+          ...(request.user?.tenantId ? { 'x-internal-tenant-id': request.user.tenantId } : {}),
         }),
       },
     });

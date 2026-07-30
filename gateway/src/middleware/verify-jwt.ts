@@ -10,7 +10,11 @@ const jwks = createRemoteJWKSet(new URL(env.AUTH_JWKS_URL));
 
 declare module 'fastify' {
   interface FastifyRequest {
-    user?: { sub: string; role: string };
+    // tenantId es `null` para roles de plataforma (platform_admin/
+    // platform_support, RFC-004) — un usuario sin tenant, no un tenant
+    // "vacío". Nunca se lee de header/query/body del cliente, solo del
+    // claim `tenant_id` del JWT verificado (RFC-003).
+    user?: { sub: string; role: string; tenantId: string | null };
   }
 }
 
@@ -69,7 +73,12 @@ export const verifyJwt = async (request: FastifyRequest, reply: FastifyReply): P
   try {
     const token = authHeader.slice('Bearer '.length);
     const { payload } = await jwtVerify(token, jwks);
-    request.user = { sub: String(payload.sub), role: String(payload['role']) };
+    const tenantClaim = payload['tenant_id'];
+    request.user = {
+      sub: String(payload.sub),
+      role: String(payload['role']),
+      tenantId: typeof tenantClaim === 'string' ? tenantClaim : null,
+    };
   } catch (error) {
     request.log.warn({ err: error }, 'JWT inválido o expirado');
     if (!isPublic) {
