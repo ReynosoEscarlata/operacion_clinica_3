@@ -1,7 +1,7 @@
 # ADR-009: Estructura de cuentas y entornos AWS
 
 **Fecha:** 2026-07-29
-**Estado:** Propuesto — inclinación registrada, **PENDIENTE DE RATIFICACIÓN HUMANA**
+**Estado:** Aceptado (2026-07-29)
 **Decisor(es):** Ricardo Reynoso
 
 ## Contexto
@@ -36,20 +36,27 @@ de configuración desde el primer despliegue, no solo en el futuro.
 
 ## Decisión
 
-**PENDIENTE DE RATIFICACIÓN HUMANA.** Inclinación registrada en Fase 0: Opción 2 (Organizations
-con cuenta por entorno), sin objeción de Ricardo — "el aislamiento de prod es parte del threat
-model, no un lujo" (razonamiento ya incluido en el plan maestro, sección 2).
+Elegimos la **Opción 1: una sola cuenta AWS con 3 entornos lógicos** (dev/staging/prod separados
+por prefijo de recurso y tags, no por cuenta). Ricardo revirtió explícitamente la inclinación de
+Fase 0 (Organizations con cuenta por entorno) el 2026-07-29, priorizando simplicidad operativa
+inicial sobre el aislamiento máximo de prod — aceptando el trade-off descrito abajo como riesgo
+consciente, no como omisión.
 
 ## Consecuencias
 
-- **Positivas:** un error de configuración en dev (ej. una SCP mal probada, un IAM role
-  sobre-permisivo de prueba) no puede alcanzar prod por diseño, no por disciplina.
-- **Negativas / tradeoffs:** el pipeline de CI/CD (Fase 9) necesita gestionar credenciales/roles
-  distintos por cuenta (vía OIDC, sin llaves de acceso de larga vida) — más piezas móviles que un
-  solo `AWS_ACCESS_KEY_ID`.
-- **Cosas a monitorear:** costo de mantener 3 cuentas activas (NAT Gateway, RDS, etc. se
-  duplican/triplican si cada entorno tiene su propia infraestructura completa) contra el
-  presupuesto austero — dev/staging pueden usar tallas menores y apagarse fuera de horario.
+- **Positivas:** setup inicial mucho más simple — sin bootstrap de AWS Organizations, sin roles
+  cross-cuenta para CI/CD, un solo conjunto de credenciales OIDC que gestionar. Menor fricción
+  para empezar la Fase 2 de inmediato.
+- **Negativas / tradeoffs:** **el aislamiento de prod pasa a depender de IAM policies y
+  convenciones de naming/tagging, no de un límite de cuenta** — un error de permisos o una SCP mal
+  probada en dev puede, en principio, alcanzar prod. Esto es exactamente el escenario que la
+  inclinación original buscaba evitar (ver amenaza relacionada en `docs/security/threat-model.md`).
+  Se acepta este riesgo explícitamente; si la plataforma escala a más clínicas o a un contrato que
+  exija aislamiento de cuenta por compliance, este ADR debe revisarse.
+- **Cosas a monitorear:** cualquier incidente donde un cambio en dev/staging haya tenido efecto en
+  prod (aunque sea menor) es una señal directa de que este trade-off dejó de ser aceptable y hay
+  que migrar a Organizations; revisar también los límites de servicio compartidos entre entornos
+  (quotas de RDS, ECS, etc. se comparten en una sola cuenta).
 
 ## Referencias
 - `claude/PLAN-challenge-5-plataforma-para-todos.md`, sección 2 (D5) y Fase 2 (Landing zone)
