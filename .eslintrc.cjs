@@ -36,5 +36,6 @@ module.exports = {
     'packages',
     'scripts',
     'pacts',
+    'infra',
   ],
 };

@@ -5,3 +5,6 @@ coverage
 *.log
 .DS_Store
 src/prisma/.demo-appointment-ids.json
+infra/cdk.out
+infra/.cdk.staging
+infra/cdk.context.json
