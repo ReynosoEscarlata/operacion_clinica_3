@@ -1,7 +1,7 @@
 # ADR-006: Enforcement de aislamiento entre tenants
 
 **Fecha:** 2026-07-29
-**Estado:** Propuesto — **PENDIENTE DE DECISIÓN HUMANA** (depende de ADR-005)
+**Estado:** Aceptado (2026-07-29)
 **Decisor(es):** Ricardo Reynoso
 
 ## Contexto
@@ -33,14 +33,21 @@ código de aplicación "simplemente no tenga bugs" no es una estrategia.
 
 ## Decisión
 
-**PENDIENTE DE DECISIÓN HUMANA.**
+Elegimos la **Opción 3: defensa en profundidad (RLS + middleware + repositorio base)**, ratificada
+por Ricardo el 2026-07-29. Consistente con ADR-005 (RLS como capa de motor) y con el patrón ya
+existente en el repo para `requestId` (`AsyncLocalStorage` + middleware, ver
+`lib/request-context.ts` de cada servicio) — el `TenantContext` de la Fase 3 sigue el mismo patrón,
+solo que ninguna capa se considera suficiente por sí sola.
 
 ## Consecuencias
 
-- **Positivas:** *(pendiente)*
-- **Negativas / tradeoffs:** la defensa en profundidad implica que cada servicio nuevo (Fase 8:
+- **Positivas:** ningún punto único de falla — un bug de código se detiene en RLS aunque el
+  middleware o el repositorio base tengan un gap; consistente con la lección del bug real de
+  `event-consumer.ts` (confiar en una sola capa falla en producción, no en desarrollo).
+- **Negativas / tradeoffs:** más superficie de código a mantener; cada servicio nuevo (Fase 8:
   `tenant-provisioning`) también debe adoptar las tres capas desde su creación, no como una
-  segunda pasada.
+  segunda pasada; requiere disciplina de code review para detectar accesos a datos que bypaseen el
+  repositorio base.
 - **Cosas a monitorear:** intentos de acceso cross-tenant bloqueados por RLS pero no por la capa
   de aplicación (señal de que el middleware tiene un gap) — debe generar una alarma dedicada
   (Fase 6, "intentos de acceso cross-tenant detectados").
