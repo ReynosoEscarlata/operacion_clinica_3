@@ -38,16 +38,18 @@ export class AuthService {
       throw new AppError(401, 'UNAUTHORIZED', 'Credenciales inválidas');
     }
 
-    const accessToken = await signAccessToken({ sub: user.id, role: user.role, tenantId: user.tenantId });
+    const actorRole = toAuthzRole(user.role);
+    const accessToken = await signAccessToken({
+      sub: user.id,
+      role: actorRole,
+      tenantId: user.tenantId,
+      doctorId: user.doctorId,
+    });
     // tenantId de User es nullable en el esquema (RFC-003: NULL = roles de
     // plataforma, RFC-004) -- issue() recibe tenantId tal cual (puede ser
     // null) más el rol del actor, que activa la rama de plataforma de la
     // política RLS de RefreshToken cuando corresponde (ver tenant-scoped.ts).
-    const { plain: refreshToken } = await this.refreshTokenRepository.issue(
-      user.id,
-      user.tenantId,
-      toAuthzRole(user.role),
-    );
+    const { plain: refreshToken } = await this.refreshTokenRepository.issue(user.id, user.tenantId, actorRole);
 
     this.logger.info({ userId: user.id }, 'Login exitoso');
 
@@ -74,7 +76,12 @@ export class AuthService {
     // limitando el daño si un refresh token se filtra y se reutiliza.
     await this.refreshTokenRepository.revoke(record.id, record.tenantId, actorRole);
 
-    const accessToken = await signAccessToken({ sub: user.id, role: user.role, tenantId: user.tenantId });
+    const accessToken = await signAccessToken({
+      sub: user.id,
+      role: actorRole,
+      tenantId: user.tenantId,
+      doctorId: user.doctorId,
+    });
     const { plain: newRefreshToken } = await this.refreshTokenRepository.issue(
       user.id,
       record.tenantId,

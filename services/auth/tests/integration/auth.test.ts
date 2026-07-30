@@ -64,8 +64,9 @@ describe('Login / refresh / JWKS (integración con DB real)', () => {
     const jwks = createRemoteJWKSet(new URL(`${baseUrl}/v1/auth/.well-known/jwks.json`));
     const { payload } = await jwtVerify(accessToken, jwks);
     expect(payload.sub).toBe(userId);
-    expect(payload['role']).toBe('CLINIC_OWNER');
+    expect(payload['role']).toBe('clinic_owner');
     expect(payload['tenant_id']).toBe(TEST_TENANT_ID);
+    expect(payload['doctor_id']).toBeNull();
   });
 
   it('login con password incorrecto retorna 401 UNAUTHORIZED', async () => {
@@ -183,7 +184,7 @@ describe('Login de usuario de plataforma (integración con DB real)', () => {
     const jwks = createRemoteJWKSet(new URL(`${baseUrl}/v1/auth/.well-known/jwks.json`));
     const { payload } = await jwtVerify(accessToken, jwks);
     expect(payload.sub).toBe(userId);
-    expect(payload['role']).toBe('PLATFORM_ADMIN');
+    expect(payload['role']).toBe('platform_admin');
     expect(payload['tenant_id']).toBeNull();
   });
 
@@ -203,5 +204,58 @@ describe('Login de usuario de plataforma (integración con DB real)', () => {
 
     expect(refreshResponse.statusCode).toBe(200);
     expect(refreshResponse.json().refreshToken).not.toBe(refreshToken);
+  });
+});
+
+// Fase 4 (RFC-004): el claim doctor_id del JWT alimenta el filtro ABAC de
+// propiedad ("un doctor solo ve sus propias citas") que se aplica más
+// adelante en appointments/doctors.
+describe('Login de usuario con rol doctor propaga doctorId en el JWT (integración con DB real)', () => {
+  let app: FastifyInstance;
+  let baseUrl: string;
+  const email = `doctor-${randomUUID()}@clinica.test`;
+  const password = 'password-correcto-123';
+  const doctorId = '55555555-5555-5555-5555-555555555555';
+  let userId: string;
+
+  beforeAll(async () => {
+    app = await buildApp();
+    await app.listen({ port: 0, host: '127.0.0.1' });
+    const address = app.server.address();
+    const port = typeof address === 'object' && address ? address.port : env.PORT;
+    baseUrl = `http://127.0.0.1:${port}`;
+
+    const created = await app.inject({
+      method: 'POST',
+      url: '/v1/users',
+      headers: TENANT_HEADERS,
+      payload: { email, name: 'Dr. de Prueba', role: 'DOCTOR', doctorId, password },
+    });
+    userId = created.json().id;
+  });
+
+  afterAll(async () => {
+    await withTenantId(prisma, TEST_TENANT_ID, async (tx) => {
+      await tx.refreshToken.deleteMany({ where: { userId } });
+      await tx.user.delete({ where: { id: userId } }).catch(() => undefined);
+    });
+    await app.close();
+    await prisma.$disconnect();
+  });
+
+  it('el access token incluye doctor_id', async () => {
+    const response = await app.inject({
+      method: 'POST',
+      url: '/v1/auth/login',
+      payload: { email, password },
+    });
+
+    expect(response.statusCode).toBe(200);
+    const { accessToken } = response.json();
+
+    const jwks = createRemoteJWKSet(new URL(`${baseUrl}/v1/auth/.well-known/jwks.json`));
+    const { payload } = await jwtVerify(accessToken, jwks);
+    expect(payload['role']).toBe('doctor');
+    expect(payload['doctor_id']).toBe(doctorId);
   });
 });
