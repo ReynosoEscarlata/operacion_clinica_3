@@ -5,18 +5,16 @@ on:
     branches: ['**']
     paths:
       - 'gateway/**'
+      - 'packages/authz/**'
       - 'tsconfig.base.json'
       - '.github/workflows/gateway-ci.yml'
   pull_request:
     branches: ['**']
     paths:
       - 'gateway/**'
+      - 'packages/authz/**'
       - 'tsconfig.base.json'
       - '.github/workflows/gateway-ci.yml'
-
-defaults:
-  run:
-    working-directory: gateway
 
 jobs:
   lint-and-test:
@@ -41,14 +39,22 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Install dependencies
-        run: npm install
+      # Workspace: @clinica/authz no esta publicado, hay que instalar desde
+      # la raiz (ver build: convertir el repo en npm workspaces).
+      - name: Install dependencies (workspace root)
+        run: npm install --workspace=gateway --workspace=packages/authz --include-workspace-root
+
+      - name: Build @clinica/authz
+        run: npm run build --workspace=packages/authz
 
       - name: Lint
+        working-directory: gateway
         run: npm run lint
 
       - name: Typecheck
+        working-directory: gateway
         run: npm run typecheck
 
       - name: Test
+        working-directory: gateway
         run: npm run test

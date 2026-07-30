@@ -5,6 +5,7 @@ on:
     branches: ['**']
     paths:
       - 'services/auth/**'
+      - 'packages/authz/**'
       - 'packages/contracts/auth/**'
       # Contract test (Pact, PLAN.md Fase 4): ver nota equivalente en
       # doctors-ci.yml.
@@ -15,16 +16,13 @@ on:
     branches: ['**']
     paths:
       - 'services/auth/**'
+      - 'packages/authz/**'
       - 'packages/contracts/auth/**'
       # Contract test (Pact, PLAN.md Fase 4): ver nota equivalente en
       # doctors-ci.yml.
       - 'pacts/gateway-auth.json'
       - 'tsconfig.base.json'
       - '.github/workflows/auth-ci.yml'
-
-defaults:
-  run:
-    working-directory: services/auth
 
 jobs:
   lint-and-test:
@@ -62,20 +60,31 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Install dependencies
-        run: npm install
+      # Workspace: @clinica/authz no esta publicado, npm no lo resuelve si
+      # se instala desde dentro de services/auth -- hay que instalar desde
+      # la raiz (ver build: convertir el repo en npm workspaces).
+      - name: Install dependencies (workspace root)
+        run: npm install --workspace=services/auth --workspace=packages/authz --include-workspace-root
+
+      - name: Build @clinica/authz
+        run: npm run build --workspace=packages/authz
 
       - name: Generate Prisma Client
+        working-directory: services/auth
         run: npm run prisma:generate
 
       - name: Lint
+        working-directory: services/auth
         run: npm run lint
 
       - name: Apply migrations
+        working-directory: services/auth
         run: npx prisma migrate deploy
 
       - name: Typecheck
+        working-directory: services/auth
         run: npm run typecheck
 
       - name: Test
+        working-directory: services/auth
         run: npm run test

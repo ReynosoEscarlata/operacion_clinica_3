@@ -5,6 +5,7 @@ on:
     branches: ['**']
     paths:
       - 'services/notifications/**'
+      - 'packages/authz/**'
       - 'packages/contracts/notifications/**'
       - 'tsconfig.base.json'
       - '.github/workflows/notifications-ci.yml'
@@ -12,13 +13,10 @@ on:
     branches: ['**']
     paths:
       - 'services/notifications/**'
+      - 'packages/authz/**'
       - 'packages/contracts/notifications/**'
       - 'tsconfig.base.json'
       - '.github/workflows/notifications-ci.yml'
-
-defaults:
-  run:
-    working-directory: services/notifications
 
 jobs:
   lint-and-test:
@@ -67,20 +65,30 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Install dependencies
-        run: npm install
+      # Workspace: @clinica/authz no esta publicado, hay que instalar desde
+      # la raiz (ver build: convertir el repo en npm workspaces).
+      - name: Install dependencies (workspace root)
+        run: npm install --workspace=services/notifications --workspace=packages/authz --include-workspace-root
+
+      - name: Build @clinica/authz
+        run: npm run build --workspace=packages/authz
 
       - name: Generate Prisma Client
+        working-directory: services/notifications
         run: npm run prisma:generate
 
       - name: Lint
+        working-directory: services/notifications
         run: npm run lint
 
       - name: Apply migrations
+        working-directory: services/notifications
         run: npx prisma migrate deploy
 
       - name: Typecheck
+        working-directory: services/notifications
         run: npm run typecheck
 
       - name: Test
+        working-directory: services/notifications
         run: npm run test

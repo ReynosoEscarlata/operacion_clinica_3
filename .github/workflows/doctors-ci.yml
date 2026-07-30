@@ -5,6 +5,7 @@ on:
     branches: ['**']
     paths:
       - 'services/doctors/**'
+      - 'packages/authz/**'
       - 'packages/contracts/doctors/**'
       # Contract test (Pact, PLAN.md Fase 4): si Appointments cambia lo que
       # espera de Doctors, commitea un pact nuevo acá — sin este path el
@@ -16,6 +17,7 @@ on:
     branches: ['**']
     paths:
       - 'services/doctors/**'
+      - 'packages/authz/**'
       - 'packages/contracts/doctors/**'
       # Contract test (Pact, PLAN.md Fase 4): si Appointments cambia lo que
       # espera de Doctors, commitea un pact nuevo acá — sin este path el
@@ -23,10 +25,6 @@ on:
       - 'pacts/appointments-doctors.json'
       - 'tsconfig.base.json'
       - '.github/workflows/doctors-ci.yml'
-
-defaults:
-  run:
-    working-directory: services/doctors
 
 jobs:
   lint-and-test:
@@ -74,20 +72,30 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Install dependencies
-        run: npm install
+      # Workspace: @clinica/authz no esta publicado, hay que instalar desde
+      # la raiz (ver build: convertir el repo en npm workspaces).
+      - name: Install dependencies (workspace root)
+        run: npm install --workspace=services/doctors --workspace=packages/authz --include-workspace-root
+
+      - name: Build @clinica/authz
+        run: npm run build --workspace=packages/authz
 
       - name: Generate Prisma Client
+        working-directory: services/doctors
         run: npm run prisma:generate
 
       - name: Lint
+        working-directory: services/doctors
         run: npm run lint
 
       - name: Apply migrations
+        working-directory: services/doctors
         run: npx prisma migrate deploy
 
       - name: Typecheck
+        working-directory: services/doctors
         run: npm run typecheck
 
       - name: Test
+        working-directory: services/doctors
         run: npm run test
