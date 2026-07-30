@@ -12,9 +12,10 @@ declare module 'fastify' {
   interface FastifyRequest {
     // tenantId es `null` para roles de plataforma (platform_admin/
     // platform_support, RFC-004) — un usuario sin tenant, no un tenant
-    // "vacío". Nunca se lee de header/query/body del cliente, solo del
-    // claim `tenant_id` del JWT verificado (RFC-003).
-    user?: { sub: string; role: string; tenantId: string | null };
+    // "vacío". doctorId es `null` salvo role === 'doctor' (RFC-004, filtro
+    // ABAC de propiedad). Nunca se leen de header/query/body del cliente,
+    // solo de los claims del JWT verificado (RFC-003).
+    user?: { sub: string; role: string; tenantId: string | null; doctorId: string | null };
   }
 }
 
@@ -74,10 +75,12 @@ export const verifyJwt = async (request: FastifyRequest, reply: FastifyReply): P
     const token = authHeader.slice('Bearer '.length);
     const { payload } = await jwtVerify(token, jwks);
     const tenantClaim = payload['tenant_id'];
+    const doctorClaim = payload['doctor_id'];
     request.user = {
       sub: String(payload.sub),
       role: String(payload['role']),
       tenantId: typeof tenantClaim === 'string' ? tenantClaim : null,
+      doctorId: typeof doctorClaim === 'string' ? doctorClaim : null,
     };
   } catch (error) {
     request.log.warn({ err: error }, 'JWT inválido o expirado');

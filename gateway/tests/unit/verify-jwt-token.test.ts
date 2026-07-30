@@ -43,8 +43,11 @@ afterAll(() => {
   jwksServer.close();
 });
 
-const signToken = async (role: string): Promise<string> =>
-  new SignJWT({ role })
+const signToken = async (
+  role: string,
+  claims: { tenant_id?: string | null; doctor_id?: string | null } = {},
+): Promise<string> =>
+  new SignJWT({ role, ...claims })
     .setProtectedHeader({ alg: 'RS256', kid })
     .setSubject('user-1')
     .setIssuedAt()
@@ -69,16 +72,37 @@ const buildFakeRequestReply = (
 };
 
 describe('verifyJwt — token best-effort en rutas públicas', () => {
-  it('un token válido de Admin en una ruta pública setea request.user (para reenviar el rol)', async () => {
+  it('un token válido en una ruta pública setea request.user (para reenviar el rol)', async () => {
     const { verifyJwt } = await import('../../src/middleware/verify-jwt.js');
-    const token = await signToken('ADMIN');
+    const token = await signToken('clinic_owner');
     const { request, reply, sendMock } = buildFakeRequestReply({
       headers: { authorization: `Bearer ${token}` },
     });
 
     await verifyJwt(request, reply);
 
-    expect(request.user).toEqual({ sub: 'user-1', role: 'ADMIN', tenantId: null });
+    expect(request.user).toEqual({ sub: 'user-1', role: 'clinic_owner', tenantId: null, doctorId: null });
+    expect(sendMock).not.toHaveBeenCalled();
+  });
+
+  it('un token de un doctor propaga doctorId en request.user (RFC-004, filtro ABAC)', async () => {
+    const { verifyJwt } = await import('../../src/middleware/verify-jwt.js');
+    const token = await signToken('doctor', {
+      tenant_id: '11111111-1111-1111-1111-111111111111',
+      doctor_id: '22222222-2222-2222-2222-222222222222',
+    });
+    const { request, reply, sendMock } = buildFakeRequestReply({
+      headers: { authorization: `Bearer ${token}` },
+    });
+
+    await verifyJwt(request, reply);
+
+    expect(request.user).toEqual({
+      sub: 'user-1',
+      role: 'doctor',
+      tenantId: '11111111-1111-1111-1111-111111111111',
+      doctorId: '22222222-2222-2222-2222-222222222222',
+    });
     expect(sendMock).not.toHaveBeenCalled();
   });
 

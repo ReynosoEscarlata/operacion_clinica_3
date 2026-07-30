@@ -1,7 +1,42 @@
+import type { IncomingHttpHeaders } from 'node:http';
+
+import { DOCTOR_ID_HEADER, TENANT_ID_HEADER, USER_ROLE_HEADER } from '@clinica/authz';
 import fastifyHttpProxy from '@fastify/http-proxy';
 import type { FastifyInstance } from 'fastify';
 
 import { env } from '../config/env.js';
+
+// Subconjunto estructural de FastifyRequest -- evita atarse al tipo exacto
+// que exige la firma de rewriteRequestHeaders de @fastify/http-proxy (que
+// difiere entre HTTP/HTTP2 y no vale la pena replicar aquí), y permite
+// testear esta función con un objeto mínimo sin levantar el proxy completo.
+interface RequestWithUser {
+  user?: { role: string; tenantId: string | null; doctorId: string | null };
+}
+
+// Si la request llegó con un JWT válido (ej. un actor autenticado que
+// cancela una cita desde el panel, en una ruta que por lo demás es pública
+// para el paciente sin cuenta), se reenvían sus claims al servicio upstream
+// en headers internos (constantes compartidas de @clinica/authz, ADR-012)
+// — el servicio decide qué hacer con eso (ej. requirePermission(), o
+// distinguir cancelledBy) — es un límite de confianza de red interna,
+// mismo criterio que en services/auth/src/modules/users/users.routes.ts.
+// Exportada (en vez de inline en registerProxyRoutes) para poder testearla
+// sin levantar el proxy completo. El tipo de retorno es `unknown` a
+// propósito: @fastify/http-proxy acepta tanto IncomingHttpHeaders (HTTP/1)
+// como su equivalente HTTP/2, y replicar esa unión aquí no aporta nada --
+// la firma real se castea en el único call site (registerProxyRoutes).
+export const buildInternalHeaders = (request: RequestWithUser, headers: IncomingHttpHeaders): unknown => ({
+  ...headers,
+  ...(request.user ? { [USER_ROLE_HEADER]: request.user.role } : {}),
+  // tenant_id nunca lo pone el cliente -- solo se reenvia si vino de un JWT
+  // verificado con ese claim (RFC-003). Un usuario de plataforma (tenantId
+  // null) no reenvia el header en absoluto, igual que un request sin JWT.
+  ...(request.user?.tenantId ? { [TENANT_ID_HEADER]: request.user.tenantId } : {}),
+  // doctor_id solo presente para role === 'doctor' (RFC-004, filtro ABAC de
+  // propiedad en appointments/doctors).
+  ...(request.user?.doctorId ? { [DOCTOR_ID_HEADER]: request.user.doctorId } : {}),
+});
 
 /**
  * Enrutamiento por prefijo hacia cada servicio, según los contratos en
@@ -29,22 +64,8 @@ export const registerProxyRoutes = async (app: FastifyInstance): Promise<void> =
       rewritePrefix: route.prefix,
       upstream: route.upstream,
       replyOptions: {
-        // Si la request llegó con un JWT válido (ej. un Admin/Staff
-        // logueado que cancela una cita desde el panel, en una ruta que
-        // por lo demás es pública para el paciente sin cuenta), se
-        // reenvía el rol al servicio upstream en un header interno. El
-        // servicio decide qué hacer con eso (ej. distinguir cancelledBy
-        // ADMIN vs PATIENT) — es un límite de confianza de red interna,
-        // mismo criterio que en services/auth/src/modules/users/users.routes.ts.
-        rewriteRequestHeaders: (request, headers) => ({
-          ...headers,
-          ...(request.user ? { 'x-internal-user-role': request.user.role } : {}),
-          // tenant_id nunca lo pone el cliente -- solo se reenvia si vino de
-          // un JWT verificado con ese claim (RFC-003). Un usuario de
-          // plataforma (tenantId null) no reenvia el header en absoluto,
-          // igual que un request sin JWT.
-          ...(request.user?.tenantId ? { 'x-internal-tenant-id': request.user.tenantId } : {}),
-        }),
+        rewriteRequestHeaders: (request, headers) =>
+          buildInternalHeaders(request, headers) as IncomingHttpHeaders,
       },
     });
   }
