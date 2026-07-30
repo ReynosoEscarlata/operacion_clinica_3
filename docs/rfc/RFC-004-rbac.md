@@ -1,7 +1,7 @@
 # RFC-004: Modelo de autorización (RBAC + ABAC)
 
 **Fase:** 1 del `claude/PLAN-challenge-5-plataforma-para-todos.md`
-**Estado:** Propuesto — **Decisión: PENDIENTE DE DECISIÓN HUMANA** en los puntos marcados `?`
+**Estado:** Aceptado (2026-07-29)
 **Relacionado:** `docs/baseline-challenge-4.md`, RFC-003-tenancy.md, ADR-012.
 
 ## Contexto
@@ -98,36 +98,50 @@ dato, este permiso debe crearse entonces; no se incluye en la matriz por no exis
 
 Roles de plataforma (`platform_admin`, `platform_support`) y de tenant (`clinic_owner`,
 `clinic_admin`, `doctor`, `receptionist`, `patient`). **Ninguno de estos 7 roles existe hoy en el
-código** — hoy solo hay `ADMIN`/`STAFF` sin distinción de alcance. Toda celda marcada `?` requiere
-que el humano decida el mapeo; no se asume.
+código** — hoy solo hay `ADMIN`/`STAFF` sin distinción de alcance.
+
+Principio decidido (2026-07-29) que resuelve la mayoría de las celdas: **`clinic_owner` tiene
+capacidades administrativas y financieras exclusivas** (gestión de usuarios/staff, alta de
+doctores, refunds, auditoría completa) que **`clinic_admin` no tiene** — `clinic_admin` opera el
+día a día (citas, pacientes, disponibilidad de doctores) sin esas capacidades superiores. Esto
+refleja el patrón habitual de SaaS B2B: `clinic_owner` es quien contrató el servicio y responde
+por la cuenta; `clinic_admin` es personal operativo con permisos delegados.
 
 `✓` = permitido. `✓ (propio)` = permitido solo sobre recursos propios (regla ABAC). `—` = no
-aplica. `?` = requiere decisión humana.
+aplica.
 
 | Permiso | platform_admin | platform_support | clinic_owner | clinic_admin | doctor | receptionist | patient |
 |---|---|---|---|---|---|---|---|
 | `auth:login` / `auth:refresh` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | — (paciente no tiene cuenta hoy) |
-| `user:create` | ✓ | — | ? | ? | — | — | — |
-| `user:list` | ✓ | ✓ (auditado) | ? | ? | — | — | — |
-| `user:deactivate` | ✓ | — | ? | ? | — | — | — |
-| `doctor:create` | ✓ | — | ? | ? | — | — | — |
+| `user:create` | ✓ | — | ✓ | — | — | — | — |
+| `user:list` | ✓ | ✓ (auditado) | ✓ | ✓ | — | — | — |
+| `user:deactivate` | ✓ | — | ✓ | — | — | — | — |
+| `doctor:create` | ✓ | — | ✓ | — | — | — | — |
 | `doctor:list` / `doctor:read` / `doctor:read_slots` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ (pública) |
-| `doctor:manage_availability` | ✓ | — | ? | ? | ✓ (propio) | ? | — |
-| `patient:create` | ✓ | — | — | — | — | — | ✓ (self-service, público) |
+| `doctor:manage_availability` | ✓ | — | ✓ | ✓ | ✓ (propio) | — | — |
+| `patient:create` | ✓ | — | — | — | — | ✓ | ✓ (self-service, público) |
 | `patient:read` (single) | ✓ | ✓ (auditado) | ✓ | ✓ | ✓ (propio, ver nota) | ✓ | ✓ (pública, por posesión) |
-| `patient:list` | ✓ | ✓ (auditado) | ✓ | ✓ | — | ? | — |
-| `patient:update` | ✓ | — | ✓ | ✓ | — | ? | — |
-| `appointment:create` | ✓ | — | — | — | — | ? | ✓ (self-service, público) |
+| `patient:list` | ✓ | ✓ (auditado) | ✓ | ✓ | — | ✓ | — |
+| `patient:update` | ✓ | — | ✓ | ✓ | — | ✓ | — |
+| `appointment:create` | ✓ | — | ✓ | ✓ | — | ✓ | ✓ (self-service, público) |
 | `appointment:read` (single) | ✓ | ✓ (auditado) | ✓ | ✓ | ✓ (propio) | ✓ | ✓ (pública, por posesión) |
 | `appointment:list` | ✓ | ✓ (auditado) | ✓ | ✓ | ✓ (propio) | ✓ | — |
-| `appointment:cancel` | ✓ | — | ✓ | ✓ | ? | ✓ | ✓ (pública, por posesión) |
-| `appointment:complete` | ✓ | — | ✓ | ✓ | ✓ (propio) | ? | — |
-| `appointment:mark_no_show` | ✓ | — | ✓ | ✓ | ✓ (propio) | ? | — |
+| `appointment:cancel` | ✓ | — | ✓ | ✓ | ✓ (propio) | ✓ | ✓ (pública, por posesión) |
+| `appointment:complete` | ✓ | — | ✓ | ✓ | ✓ (propio) | ✓ | — |
+| `appointment:mark_no_show` | ✓ | — | ✓ | ✓ | ✓ (propio) | ✓ | — |
 | `dashboard:read` | ✓ | ✓ | ✓ | ✓ | — | — | — |
-| `audit:read` | ✓ | ✓ | ✓ | ? | — | — | — |
+| `audit:read` | ✓ | ✓ | ✓ | — | — | — | — |
 | `dead_letter:read/retry/remove` | ✓ | ✓ (justificado) | — | — | — | — | — |
 | `payment:create_customer/create_intent/cancel_intent` | ✓ | — | — | — | — | — | — (llamada interna, no expuesta) |
-| `payment:refund` | ✓ | — | ✓ | ? | — | — | — |
+| `payment:refund` | ✓ | — | ✓ | — | — | — | — |
+
+**Decisiones que resolvieron celdas específicas (2026-07-29):**
+- `doctor:cancel` (dentro de `appointment:cancel`): el doctor **sí** puede cancelar sus propias
+  citas, con la misma regla ABAC de propiedad que `appointment:complete`/`mark_no_show`
+  (`appointment.doctorId === actor.id`).
+- `receptionist`: alcance operativo completo sobre citas y pacientes (crear, listar, actualizar,
+  cancelar, completar, marcar no-show), **sin** `doctor:manage_availability` ni las capacidades de
+  `clinic_owner` (gestión de usuarios, alta de doctores, refunds).
 
 **Nota sobre `doctor` y `patient:read`:** un médico solo debería ver los datos de los pacientes que
 tienen cita con él, no el listado completo de pacientes de la clínica — esta es exactamente la
@@ -148,11 +162,12 @@ regla ABAC del contexto (filtro `appointment.doctorId === actor.id`, y de ahí a
 
 ## Roles personalizados por tenant
 
-**Recomendación (no decisión):** no permitir roles personalizados en v1 — los 5 roles de tenant
-cubren los casos reales del dominio y agregar roles a medida multiplica la superficie de la matriz
-de permisos sin necesidad demostrada. El esquema de permisos (`recurso:acción` como catálogo
-plano, no enum cerrado) debe poder soportarlo más adelante sin romper cambios de esquema, pero la
-UI/API de administración de roles personalizados no se construye en este challenge.
+**Decidido (2026-07-29): no en v1.** Los 5 roles de tenant cubren los casos reales del dominio y
+agregar roles a medida multiplica la superficie de la matriz de permisos sin necesidad demostrada.
+El esquema de permisos (`recurso:acción` como catálogo plano, no enum cerrado) debe poder
+soportarlo más adelante sin romper cambios de esquema (consistente con `packages/authz/` de
+ADR-012), pero la UI/API de administración de roles personalizados no se construye en este
+challenge.
 
 ## Autorización servicio-a-servicio
 
@@ -186,17 +201,22 @@ pero nunca sin las cuatro condiciones anteriores.
 
 ## Preguntas abiertas para el humano
 
-1. Todas las celdas marcadas `?` en la matriz — principalmente: ¿`clinic_owner` y `clinic_admin`
-   tienen exactamente los mismos permisos (y la diferencia es solo de facturación/contrato), o
-   `clinic_owner` tiene capacidades que `clinic_admin` no (ej. dar de baja la cuenta de la
-   clínica, cambiar de plan)?
-2. ¿`receptionist` puede cancelar/completar citas, o solo verlas y crear nuevas? Hoy `STAFF` puede
-   hacer todo lo que `ADMIN` en la mayoría de rutas — hay que decidir si eso se mantiene para
-   `receptionist` o se recorta.
-3. ¿`doctor` puede cancelar su propia cita, o solo completarla/marcarla no-show? Cancelar hoy es
-   una acción pública (paciente), y también protegida (admin) — falta decidir si el doctor entra
-   en esa segunda vía.
-4. ¿Se ratifica "no roles personalizados en v1" como decisión, o algún contrato ya firmado (fuera
-   del alcance de este repo) obliga a soportarlos desde el lanzamiento?
-5. `payment:refund` para `clinic_admin` — dar refunds tiene impacto financiero directo; ¿se limita
-   a `clinic_owner` solamente, o ambos roles lo tienen con un tope de monto?
+Todas las preguntas abiertas originales de este RFC se resolvieron el 2026-07-29 (ver la matriz y
+las decisiones anotadas debajo de ella). Resumen de lo decidido:
+
+1. `clinic_owner` tiene capacidades administrativas/financieras exclusivas
+   (`user:*`, `doctor:create`, `payment:refund`, `audit:read` completo) que `clinic_admin` no
+   tiene; `clinic_admin` opera el día a día sin esas capacidades superiores.
+2. `receptionist` tiene alcance operativo completo sobre citas y pacientes (incluidos
+   cancelar/completar/marcar no-show), sin gestión de disponibilidad de doctores ni las
+   capacidades exclusivas de `clinic_owner`.
+3. `doctor` sí puede cancelar sus propias citas (regla ABAC de propiedad), además de completarlas
+   y marcarlas no-show.
+4. No se soportan roles personalizados por tenant en v1; el esquema de permisos queda abierto para
+   soportarlo después sin romper cambios de esquema.
+5. `payment:refund` queda exclusivo de `clinic_owner` (no de `clinic_admin`), sin tope de monto
+   adicional definido en este RFC — si se necesita un tope, es una regla de negocio a nivel de
+   `payments.service.ts`, no un permiso adicional.
+
+Sin preguntas pendientes para pasar a la Fase 4 (implementación del motor de permisos,
+`packages/authz/`, ADR-012).
