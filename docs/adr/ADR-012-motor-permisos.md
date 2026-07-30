@@ -1,7 +1,7 @@
 # ADR-012: Modelo de autorización y dónde vive el motor de permisos
 
 **Fecha:** 2026-07-29
-**Estado:** Propuesto — **PENDIENTE DE DECISIÓN HUMANA** (depende de RFC-004)
+**Estado:** Aceptado (2026-07-29)
 **Decisor(es):** Ricardo Reynoso
 
 ## Contexto
@@ -42,16 +42,26 @@ servicio (duplicado), o en una librería compartida?
 
 ## Decisión
 
-**PENDIENTE DE DECISIÓN HUMANA.**
+Elegimos la **Opción 3: librería compartida `packages/authz/`**. Ratificada por Ricardo el
+2026-07-29. RBAC (la matriz rol×permiso de RFC-004) se evalúa vía middleware declarativo
+(`requirePermission('appointment:cancel')`) importado por los 5 servicios desde una única fuente
+de verdad; el filtro ABAC de propiedad del recurso (ej. el médico solo ve sus propias citas) se
+implementa dentro del repositorio de cada servicio, porque necesita el dato concreto del recurso,
+pero usando tipos/constantes de la misma librería.
 
 ## Consecuencias
 
-- **Positivas:** *(pendiente)*
-- **Negativas / tradeoffs:** *(pendiente)*
-- **Cosas a monitorear:** si se elige la Opción 3, vigilar que `packages/authz/` no se convierta en
-  un cuello de botella de despliegue (todo servicio depende de su versión) — mismo riesgo que ya
-  existe hoy con `packages/contracts/` duplicado a mano en `gateway/openapi-specs/` (documentado
-  en `SPEC.md` como trade-off aceptado).
+- **Positivas:** una sola definición de la matriz rol×permiso — evita que RFC-004 y el código
+  diverjan silenciosamente entre servicios; consistente con el patrón que el repo ya usa para
+  `packages/contracts/`.
+- **Negativas / tradeoffs:** introduce una dependencia interna nueva que los 5 servicios deben
+  importar y versionar juntos — un cambio a la librería requiere rebuild/redeploy coordinado si no
+  se versiona con cuidado.
+- **Cosas a monitorear:** vigilar que `packages/authz/` no se convierta en un cuello de botella de
+  despliegue (todo servicio depende de su versión) — mismo riesgo que ya existe hoy con
+  `packages/contracts/` duplicado a mano en `gateway/openapi-specs/` (documentado en `SPEC.md`
+  como trade-off aceptado); definir desde el inicio una convención de versionado semántico para
+  `packages/authz/` que evite romper servicios que aún no actualizaron su dependencia.
 
 ## Referencias
 - `docs/rfc/RFC-004-rbac.md`
