@@ -1,3 +1,6 @@
+# Build context: la raiz del repo (ver docker-compose.yml), no
+# services/auth -- npm workspaces (@clinica/authz) lo exige, ver
+# "build: convertir el repo en npm workspaces".
 FROM node:20-alpine AS base
 WORKDIR /app
 # El motor de Prisma necesita OpenSSL; sin esto, Alpine falla a detectarlo
@@ -5,20 +8,30 @@ WORKDIR /app
 RUN apk add --no-cache openssl
 
 FROM base AS deps
-COPY package*.json ./
-COPY prisma ./prisma
-RUN npm install && npx prisma generate
+COPY package.json package-lock.json ./
+COPY services/auth/package.json ./services/auth/package.json
+COPY packages/authz/package.json ./packages/authz/package.json
+RUN npm install --workspace=services/auth --workspace=packages/authz --include-workspace-root
+COPY packages/authz ./packages/authz
+RUN npm run build --workspace=packages/authz
+COPY services/auth/prisma ./services/auth/prisma
+RUN npx prisma generate --schema=services/auth/prisma/schema.prisma
 
 FROM deps AS build
-COPY . .
-RUN npm run build
+COPY services/auth ./services/auth
+RUN npm run build --workspace=services/auth
 
 FROM base AS runtime
 ENV NODE_ENV=production
-COPY package*.json ./
-COPY prisma ./prisma
-RUN npm install --omit=dev && npx prisma generate
-COPY --from=build /app/dist ./dist
+COPY package.json package-lock.json ./
+COPY services/auth/package.json ./services/auth/package.json
+COPY packages/authz/package.json ./packages/authz/package.json
+RUN npm install --omit=dev --workspace=services/auth --workspace=packages/authz --include-workspace-root
+COPY --from=build /app/packages/authz/dist ./packages/authz/dist
+COPY --from=build /app/services/auth/dist ./services/auth/dist
+COPY services/auth/prisma ./services/auth/prisma
+RUN npx prisma generate --schema=services/auth/prisma/schema.prisma
+WORKDIR /app/services/auth
 EXPOSE 4001
 # Aplica migraciones pendientes antes de arrancar (igual que el monolito en
 # CI: `prisma migrate deploy`, nunca `migrate dev` en producción).

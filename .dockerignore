@@ -1,0 +1,10 @@
+**/node_modules
+**/dist
+**/coverage
+**/.env
+**/*.log
+.git
+.claude
+claude
+infra/cdk.out
+infra/.cdk.staging

@@ -120,7 +120,9 @@ services:
       retries: 5
 
   auth:
-    build: ./services/auth
+    build:
+      context: .
+      dockerfile: services/auth/Dockerfile
     restart: unless-stopped
     environment:
       NODE_ENV: development
@@ -137,7 +139,9 @@ services:
         condition: service_healthy
 
   appointments:
-    build: ./services/appointments
+    build:
+      context: .
+      dockerfile: services/appointments/Dockerfile
     restart: unless-stopped
     environment:
       NODE_ENV: development
@@ -156,7 +160,9 @@ services:
         condition: service_healthy
 
   doctors:
-    build: ./services/doctors
+    build:
+      context: .
+      dockerfile: services/doctors/Dockerfile
     restart: unless-stopped
     environment:
       NODE_ENV: development
@@ -173,7 +179,9 @@ services:
         condition: service_healthy
 
   payments:
-    build: ./services/payments
+    build:
+      context: .
+      dockerfile: services/payments/Dockerfile
     restart: unless-stopped
     environment:
       NODE_ENV: development
@@ -192,7 +200,9 @@ services:
         condition: service_healthy
 
   notifications:
-    build: ./services/notifications
+    build:
+      context: .
+      dockerfile: services/notifications/Dockerfile
     restart: unless-stopped
     environment:
       NODE_ENV: development
@@ -210,7 +220,9 @@ services:
         condition: service_healthy
 
   gateway:
-    build: ./gateway
+    build:
+      context: .
+      dockerfile: gateway/Dockerfile
     restart: unless-stopped
     environment:
       NODE_ENV: development
