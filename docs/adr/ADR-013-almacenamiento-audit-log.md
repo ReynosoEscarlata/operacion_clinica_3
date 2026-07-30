@@ -1,7 +1,7 @@
 # ADR-013: Almacenamiento del audit log e inmutabilidad
 
 **Fecha:** 2026-07-29
-**Estado:** Propuesto — **PENDIENTE DE DECISIÓN HUMANA**
+**Estado:** Aceptado (2026-07-29)
 **Decisor(es):** Ricardo Reynoso
 
 ## Contexto
@@ -40,17 +40,30 @@ no deben confundirse: un audit log de compliance debe registrar también lectura
 
 ## Decisión
 
-**PENDIENTE DE DECISIÓN HUMANA.**
+Elegimos la **Opción 1: tabla append-only por servicio** (sin privilegios de `UPDATE`/`DELETE`
+para el rol de aplicación) **+ exportación periódica a S3 con Object Lock en modo compliance**,
+sin el encadenamiento por hash de la Opción 3. Ricardo priorizó menor superficie de fallo (la
+escritura garantizada depende de un solo paso crítico, el insert en Postgres, no de tres) sobre la
+capa adicional de detección criptográfica de manipulación.
 
 ## Consecuencias
 
-- **Positivas:** *(pendiente)*
-- **Negativas / tradeoffs:** cualquier opción elegida implica que **toda** ruta que toque PII
-  (según la clasificación de `docs/baseline-challenge-4.md` sección 2) debe escribir al audit log
-  antes de responder — esto es un cambio transversal a los 5 servicios, no localizado.
-- **Cosas a monitorear:** latencia agregada por request si la escritura del audit log es
-  síncrona y bloqueante (regla explícita: "si el audit log falla, la operación falla") — medir el
-  impacto en p95 una vez implementado (Fase 6).
+- **Positivas:** reutiliza infraestructura ya existente (Postgres por servicio); menos pasos
+  críticos en el camino de escritura garantizada ("si el audit log falla, la operación falla") que
+  la Opción 3 — solo el insert a la tabla debe tener éxito de forma síncrona, el export a S3 puede
+  ser asíncrono sin poner en riesgo la operación de negocio.
+- **Negativas / tradeoffs:** sin encadenamiento por hash, si alguien lograra escribir directamente
+  en la tabla con credenciales de un rol mal configurado (ej. uno con privilegios de `UPDATE` por
+  error de IAM), **no habría forma criptográfica de detectar la manipulación** — la inmutabilidad
+  depende enteramente de que los privilegios de rol estén bien configurados y no de una
+  verificación adicional. Esto es exactamente el mismo tipo de riesgo que la amenaza #9 del threat
+  model (borrado/alteración del audit log) — se acepta el trade-off, pero refuerza la importancia
+  de que el rol de aplicación nunca tenga `UPDATE`/`DELETE` sobre esta tabla, verificado con tests.
+- **Cosas a monitorear:** toda ruta que toque PII (según `docs/baseline-challenge-4.md` sección 2)
+  debe escribir al audit log antes de responder — cambio transversal a los 5 servicios; latencia
+  agregada por request por la escritura síncrona (medir p95 en Fase 6); privilegios del rol de
+  aplicación sobre la tabla de audit log (revisar en cada cambio de infraestructura que no se
+  otorgue `UPDATE`/`DELETE` por error).
 
 ## Referencias
 - `docs/security/threat-model.md`, amenazas #7 y #9
