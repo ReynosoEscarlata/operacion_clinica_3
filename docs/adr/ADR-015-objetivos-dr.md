@@ -1,7 +1,7 @@
 # ADR-015: Objetivos de DR (RTO/RPO) y estrategia
 
 **Fecha:** 2026-07-29
-**Estado:** Propuesto — **PENDIENTE DE DECISIÓN HUMANA**
+**Estado:** Aceptado (2026-07-29)
 **Decisor(es):** Ricardo Reynoso
 
 ## Contexto
@@ -44,17 +44,29 @@ Fase 2 (RDS Multi-AZ) o se difiere.
 
 ## Decisión
 
-**PENDIENTE DE DECISIÓN HUMANA.** Se resuelve formalmente en el RFC-disaster-recovery.md de la
-Fase 7, pero la Fase 2 necesita una inclinación inicial para decidir si RDS se aprovisiona
-Multi-AZ desde el principio.
+Elegimos la **Opción 1: backup & restore** como estrategia general de DR — sin infraestructura
+standby corriendo, snapshots automáticos + PITR. Ricardo priorizó el costo (compatible con el
+presupuesto austero confirmado, ~$150-300/mes @10 clínicas) sobre un RTO más bajo, coherente con
+que hoy no hay clínicas reales en producción todavía. La Fase 2 **no** aprovisiona RDS Multi-AZ
+por defecto bajo esta decisión — la talla base es Single-AZ, con Multi-AZ como opción a activar
+por servicio/entorno si el RFC-DR de la Fase 7 lo justifica para un caso específico.
 
 ## Consecuencias
 
-- **Positivas:** *(pendiente)*
-- **Negativas / tradeoffs:** *(pendiente)*
-- **Cosas a monitorear:** costo real de Multi-AZ de RDS (duplica el costo de cómputo de la
-  instancia) contra el presupuesto austero — si se activa desde la Fase 2 sin haber corrido el
-  cost model completo, puede consumir la mayor parte del rango de $150-300/mes solo en RDS.
+- **Positivas:** costo de infraestructura significativamente menor (RDS Single-AZ, sin duplicar
+  cómputo; sin instancias standby corriendo 24/7) — deja margen del presupuesto austero para otros
+  componentes (WAF, Secrets Manager, observabilidad).
+- **Negativas / tradeoffs:** **RTO alto** (minutos a horas según tamaño de la restauración) — una
+  caída de RDS en producción real dejaría el servicio afectado indisponible por ese tiempo, sin
+  failover automático. Se acepta como riesgo consciente mientras no haya clínicas reales
+  dependiendo del sistema; este ADR debe revisarse explícitamente antes de aceptar el primer
+  cliente de producción real.
+- **Cosas a monitorear:** el RFC-DR de la Fase 7 debe fijar el RTO/RPO exacto por clase de servicio
+  sobre esta base — si algún servicio (ej. `appointments` en horario de atención) resulta
+  necesitar un RTO menor al que backup & restore ofrece, ese es el momento de reconsiderar este
+  ADR para ese servicio puntual, no para toda la plataforma; probar el proceso de restore
+  (game day 2 de la Fase 7) es obligatorio, no opcional, precisamente porque no hay standby que
+  compense un backup mal probado.
 
 ## Referencias
 - `claude/PLAN-challenge-5-plataforma-para-todos.md`, Fase 7 (RFC-disaster-recovery.md completo)
