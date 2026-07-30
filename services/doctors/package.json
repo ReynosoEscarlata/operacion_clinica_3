@@ -23,6 +23,7 @@
     "https-proxy-agent": "7.0.6"
   },
   "dependencies": {
+    "@clinica/authz": "^0.1.0",
     "@fastify/cors": "^9.0.1",
     "@prisma/client": "^5.20.0",
     "@sentry/node": "^7.119.0",

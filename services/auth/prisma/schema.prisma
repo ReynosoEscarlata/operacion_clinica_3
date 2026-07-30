@@ -1,5 +1,11 @@
+// output explícito (no el default): con npm workspaces node_modules está
+// hoisted a la raíz -- sin esto, "prisma generate" de este servicio
+// pisaría el cliente generado de los otros 4 (todos resuelven a
+// node_modules/@prisma/client de la raíz por default). Cada servicio
+// necesita su propio cliente porque cada uno tiene un schema distinto.
 generator client {
   provider = "prisma-client-js"
+  output   = "../node_modules/@prisma/client"
 }
 
 datasource db {

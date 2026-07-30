@@ -20,8 +20,9 @@
     "schema": "prisma/schema.prisma"
   },
   "dependencies": {
+    "@clinica/authz": "^0.1.0",
     "@fastify/cors": "^9.0.1",
-    "@prisma/client": "^5.20.0",
+    "@prisma/client": "^5.22.0",
     "@sentry/node": "^7.119.0",
     "@sinclair/typebox": "^0.32.35",
     "bcryptjs": "^2.4.3",

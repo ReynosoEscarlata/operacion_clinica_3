@@ -1,5 +1,8 @@
+// output explícito: con npm workspaces node_modules está hoisted a la raíz,
+// ver el mismo comentario en services/auth/prisma/schema.prisma.
 generator client {
   provider = "prisma-client-js"
+  output   = "../node_modules/@prisma/client"
 }
 
 datasource db {

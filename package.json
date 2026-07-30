@@ -6,6 +6,11 @@
   "engines": {
     "node": ">=20"
   },
+  "workspaces": [
+    "services/*",
+    "gateway",
+    "packages/authz"
+  ],
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "build": "tsc -p tsconfig.json",
