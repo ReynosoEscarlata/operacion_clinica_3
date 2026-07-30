@@ -18,13 +18,27 @@ import { getTenantId } from './tenant-context.js';
 // la migración (`find_user_for_login`, etc.) para el porqué: autenticar a
 // alguien requiere una búsqueda cross-tenant antes de que exista un tenant
 // conocido.
+// `actorRole` (Fase 4, RFC-004): fija `app.actor_role`, la GUC que la rama
+// de plataforma de las políticas RLS de User/RefreshToken/OutboxEvent
+// exige para dejar pasar una fila con tenantId NULL. Sin esto, un actor de
+// plataforma (tenantId null) nunca podría leer ni escribir su propia fila
+// -- necesario en particular para refresh-token.repository.ts (issue/revoke
+// de un platform_admin/platform_support). Es el mismo string en minúsculas
+// que usan las políticas SQL y `@clinica/authz`, nunca el valor del enum
+// de Prisma (mayúsculas) -- ver users.mapper.ts.
 export const withTenantId = async <T>(
   prisma: PrismaClient,
   tenantId: string | null,
   fn: (tx: Prisma.TransactionClient) => Promise<T>,
+  actorRole?: string,
 ): Promise<T> => {
   return prisma.$transaction(async (tx) => {
-    await tx.$executeRaw`SELECT set_config('app.current_tenant', ${tenantId}, true)`;
+    if (tenantId !== null) {
+      await tx.$executeRaw`SELECT set_config('app.current_tenant', ${tenantId}, true)`;
+    }
+    if (actorRole) {
+      await tx.$executeRaw`SELECT set_config('app.actor_role', ${actorRole}, true)`;
+    }
     return fn(tx);
   });
 };

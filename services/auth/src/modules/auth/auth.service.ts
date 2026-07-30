@@ -3,6 +3,7 @@ import { AppError } from '../../lib/app-error.js';
 import { signAccessToken } from '../../lib/jwt.js';
 import type { Logger } from '../../lib/logger.js';
 import { verifyPassword } from '../../lib/password.js';
+import { toAuthzRole } from '../users/users.mapper.js';
 import type { UsersRepository } from '../users/users.repository.js';
 import type { RefreshTokenRepository } from './refresh-token.repository.js';
 
@@ -39,18 +40,14 @@ export class AuthService {
 
     const accessToken = await signAccessToken({ sub: user.id, role: user.role, tenantId: user.tenantId });
     // tenantId de User es nullable en el esquema (RFC-003: NULL = roles de
-    // plataforma), pero esos roles no se construyen en esta fase -- todo
-    // usuario real hoy pertenece a un tenant. Si esto cambiara (Fase 4), la
-    // emisión de refresh token para un usuario de plataforma necesitará su
-    // propio diseño (RefreshToken.tenantId es NOT NULL hoy).
-    if (!user.tenantId) {
-      throw new AppError(
-        500,
-        'PLATFORM_USER_LOGIN_NOT_SUPPORTED',
-        'Login de usuarios de plataforma no soportado todavía',
-      );
-    }
-    const { plain: refreshToken } = await this.refreshTokenRepository.issue(user.id, user.tenantId);
+    // plataforma, RFC-004) -- issue() recibe tenantId tal cual (puede ser
+    // null) más el rol del actor, que activa la rama de plataforma de la
+    // política RLS de RefreshToken cuando corresponde (ver tenant-scoped.ts).
+    const { plain: refreshToken } = await this.refreshTokenRepository.issue(
+      user.id,
+      user.tenantId,
+      toAuthzRole(user.role),
+    );
 
     this.logger.info({ userId: user.id }, 'Login exitoso');
 
@@ -71,12 +68,18 @@ export class AuthService {
       throw new AppError(401, 'UNAUTHORIZED', 'Token inválido o expirado');
     }
 
+    const actorRole = toAuthzRole(user.role);
+
     // Rotación: el refresh token usado se revoca y se emite uno nuevo,
     // limitando el daño si un refresh token se filtra y se reutiliza.
-    await this.refreshTokenRepository.revoke(record.id, record.tenantId);
+    await this.refreshTokenRepository.revoke(record.id, record.tenantId, actorRole);
 
     const accessToken = await signAccessToken({ sub: user.id, role: user.role, tenantId: user.tenantId });
-    const { plain: newRefreshToken } = await this.refreshTokenRepository.issue(user.id, record.tenantId);
+    const { plain: newRefreshToken } = await this.refreshTokenRepository.issue(
+      user.id,
+      record.tenantId,
+      actorRole,
+    );
 
     return { accessToken, refreshToken: newRefreshToken, expiresIn: env.ACCESS_TOKEN_TTL_SECONDS };
   }

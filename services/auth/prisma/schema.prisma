@@ -13,9 +13,16 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// RFC-004-rbac.md: los 6 roles con cuenta (patient queda fuera -- RFC-001,
+// el paciente nunca tiene cuenta, se identifica por posesión del UUID de su
+// cita). Reemplaza ADMIN/STAFF (Fase 4, ver migración de backfill).
 enum UserRole {
-  ADMIN
-  STAFF
+  PLATFORM_ADMIN
+  PLATFORM_SUPPORT
+  CLINIC_OWNER
+  CLINIC_ADMIN
+  DOCTOR
+  RECEPTIONIST
 }
 
 // tenantId NULLABLE (RFC-003-tenancy.md, "Usuarios de plataforma en el modelo
@@ -29,7 +36,14 @@ model User {
   email        String    @unique
   name         String
   passwordHash String
-  role         UserRole  @default(STAFF)
+  role         UserRole  @default(RECEPTIONIST)
+  // Referencia por id al Doctor dueño de esta cuenta en services/doctors --
+  // sin FK real (RFC-001, cero estado compartido entre servicios, mismo
+  // patrón que Appointment.doctorId). Solo se puebla cuando role = DOCTOR
+  // (regla de negocio en users.service.ts, no un constraint de motor).
+  // Alimenta el claim doctorId del JWT (Fase 4) que habilita el filtro ABAC
+  // de propiedad de RFC-004 ("un doctor solo ve sus propias citas").
+  doctorId     String?   @db.Uuid
   active       Boolean   @default(true)
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
@@ -37,17 +51,18 @@ model User {
   refreshTokens RefreshToken[]
 
   @@index([tenantId])
+  @@index([doctorId])
 }
 
 // Hash del refresh token (nunca el token en texto plano), con rotación:
 // al refrescar, el token usado se revoca y se emite uno nuevo.
-// tenantId denormalizado desde User (NOT NULL: un token de plataforma sin
-// tenant no es un caso soportado hoy — los roles de plataforma no se
-// construyen en esta fase, ver ADR-005/RFC-003) — necesario para que la
-// política RLS de esta tabla no dependa de un JOIN contra User.
+// tenantId denormalizado desde User -- NULLABLE (Fase 4): un usuario de
+// plataforma (tenantId null) ahora sí puede loguearse (RFC-004), así que
+// su refresh token hereda el mismo NULL. Necesario para que la política RLS
+// de esta tabla no dependa de un JOIN contra User.
 model RefreshToken {
   id        String    @id @default(uuid()) @db.Uuid
-  tenantId  String    @db.Uuid
+  tenantId  String?   @db.Uuid
   userId    String    @db.Uuid
   tokenHash String    @unique
   expiresAt DateTime

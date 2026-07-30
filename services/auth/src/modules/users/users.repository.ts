@@ -1,4 +1,4 @@
-import type { PrismaClient, User } from '@prisma/client';
+import type { PrismaClient, User, UserRole } from '@prisma/client';
 
 import { writeOutboxEvent } from '../../lib/outbox.js';
 import { getTenantId } from '../../lib/tenant-context.js';
@@ -8,7 +8,9 @@ export interface CreateUserData {
   email: string;
   name: string;
   passwordHash: string;
-  role: 'ADMIN' | 'STAFF';
+  role: UserRole;
+  /** Solo para role = DOCTOR (users.service.ts valida la correlación). */
+  doctorId?: string | null;
 }
 
 // Fila mínima para decidir autenticación -- nunca la fila completa de User
@@ -20,14 +22,16 @@ export interface UserAuthLookup {
   tenantId: string | null;
   passwordHash: string;
   active: boolean;
-  role: 'ADMIN' | 'STAFF';
+  role: UserRole;
+  doctorId: string | null;
 }
 
 export interface UserRefreshLookup {
   id: string;
   tenantId: string | null;
   active: boolean;
-  role: 'ADMIN' | 'STAFF';
+  role: UserRole;
+  doctorId: string | null;
 }
 
 export interface UsersRepository {

@@ -17,32 +17,40 @@ export interface IssuedRefreshToken {
 // RLS, acotada a estas columnas, análoga a UserAuthLookup).
 export interface RefreshTokenLookup {
   id: string;
-  tenantId: string;
+  tenantId: string | null;
   userId: string;
   expiresAt: Date;
   revokedAt: Date | null;
 }
 
 export interface RefreshTokenRepository {
-  /** El tenantId ya debe estar resuelto (viene de UserAuthLookup/UserRefreshLookup) -- issue() nunca lo infiere. */
-  issue: (userId: string, tenantId: string) => Promise<IssuedRefreshToken>;
+  /**
+   * El tenantId ya debe estar resuelto (viene de UserAuthLookup/UserRefreshLookup)
+   * -- issue() nunca lo infiere. `actorRole` (formato @clinica/authz, ver
+   * users.mapper.ts) es obligatorio porque hasta un actor de tenant normal
+   * pasa por la misma política RLS de dos ramas -- para un actor de
+   * plataforma (tenantId null) es la única forma de que el INSERT pase la
+   * rama NULL de la política.
+   */
+  issue: (userId: string, tenantId: string | null, actorRole: string) => Promise<IssuedRefreshToken>;
   /** Búsqueda cross-tenant intencional -- solo para el flujo de refresh. */
   findActiveByToken: (plain: string) => Promise<RefreshTokenLookup | null>;
-  revoke: (id: string, tenantId: string) => Promise<void>;
+  revoke: (id: string, tenantId: string | null, actorRole: string) => Promise<void>;
 }
 
 export class PrismaRefreshTokenRepository implements RefreshTokenRepository {
   constructor(private readonly prisma: PrismaClient) {}
 
-  async issue(userId: string, tenantId: string): Promise<IssuedRefreshToken> {
+  async issue(userId: string, tenantId: string | null, actorRole: string): Promise<IssuedRefreshToken> {
     const plain = randomBytes(32).toString('hex');
     const tokenHash = hashToken(plain);
     const expiresAt = new Date(Date.now() + env.REFRESH_TOKEN_TTL_SECONDS * 1000);
 
-    const record = await withTenantId(this.prisma, tenantId, (tx) =>
-      tx.refreshToken.create({
-        data: { userId, tenantId, tokenHash, expiresAt },
-      }),
+    const record = await withTenantId(
+      this.prisma,
+      tenantId,
+      (tx) => tx.refreshToken.create({ data: { userId, tenantId, tokenHash, expiresAt } }),
+      actorRole,
     );
 
     return { plain, record };
@@ -62,9 +70,12 @@ export class PrismaRefreshTokenRepository implements RefreshTokenRepository {
     return record;
   }
 
-  async revoke(id: string, tenantId: string): Promise<void> {
-    await withTenantId(this.prisma, tenantId, (tx) =>
-      tx.refreshToken.update({ where: { id }, data: { revokedAt: new Date() } }),
+  async revoke(id: string, tenantId: string | null, actorRole: string): Promise<void> {
+    await withTenantId(
+      this.prisma,
+      tenantId,
+      (tx) => tx.refreshToken.update({ where: { id }, data: { revokedAt: new Date() } }),
+      actorRole,
     );
   }
 }

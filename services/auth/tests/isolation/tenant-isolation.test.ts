@@ -27,7 +27,7 @@ describe('Aislamiento cross-tenant: Users', () => {
       payload: {
         email: `iso-a-${randomUUID()}@clinica.test`,
         name: 'Usuario Tenant A',
-        role: 'STAFF',
+        role: 'RECEPTIONIST',
         password: 'super-secreta',
       },
     });
@@ -40,7 +40,7 @@ describe('Aislamiento cross-tenant: Users', () => {
       payload: {
         email: `iso-b-${randomUUID()}@clinica.test`,
         name: 'Usuario Tenant B',
-        role: 'STAFF',
+        role: 'RECEPTIONIST',
         password: 'super-secreta',
       },
     });

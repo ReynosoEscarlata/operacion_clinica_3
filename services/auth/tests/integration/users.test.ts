@@ -33,12 +33,12 @@ describe('Users CRUD (integración con DB real)', () => {
     await prisma.$disconnect();
   });
 
-  it('crea un usuario Admin/Staff sin exponer el passwordHash', async () => {
+  it('crea un usuario sin exponer el passwordHash', async () => {
     const response = await app.inject({
       method: 'POST',
       url: '/v1/users',
       headers: TENANT_HEADERS,
-      payload: { email: testEmail, name: 'Staff de Prueba', role: 'STAFF', password: 'super-secreta' },
+      payload: { email: testEmail, name: 'Staff de Prueba', role: 'RECEPTIONIST', password: 'super-secreta' },
     });
 
     expect(response.statusCode).toBe(201);
@@ -65,7 +65,7 @@ describe('Users CRUD (integración con DB real)', () => {
       method: 'POST',
       url: '/v1/users',
       headers: TENANT_HEADERS,
-      payload: { email: testEmail, name: 'Otro', role: 'ADMIN', password: 'super-secreta' },
+      payload: { email: testEmail, name: 'Otro', role: 'CLINIC_OWNER', password: 'super-secreta' },
     });
 
     expect(response.statusCode).toBe(409);
