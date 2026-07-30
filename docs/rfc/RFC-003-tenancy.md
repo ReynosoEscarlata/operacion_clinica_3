@@ -1,14 +1,9 @@
 # RFC-003: Modelo de tenancy
 
 **Fase:** 1 del `claude/PLAN-challenge-5-plataforma-para-todos.md`
-**Estado:** Propuesto — **Decisión: PENDIENTE DE DECISIÓN HUMANA**
+**Estado:** Aceptado (2026-07-29)
 **Relacionado:** `docs/baseline-challenge-4.md` (inventario de línea base), `docs/backlog-deuda.md`
 (ítems 1-4, todos BLOQUEA-MULTITENANCY), ADR-005, ADR-006.
-
-> Nota de contexto (no es la decisión formal): en la Fase 0, Ricardo registró una inclinación
-> inicial hacia **shared DB + `tenant_id` + Row Level Security**. Esta RFC formaliza esa discusión
-> con la comparativa completa exigida por el plan maestro; la sección "Decisión" queda vacía hasta
-> que se apruebe explícitamente aquí.
 
 ---
 
@@ -178,7 +173,11 @@ hoy en el código.
 
 ## Decisión
 
-**PENDIENTE DE DECISIÓN HUMANA.**
+Elegimos la **Opción A: shared DB + `tenant_id` + Row Level Security**, ratificada por Ricardo el
+2026-07-29 (ver ADR-005). La Opción D (híbrido pool+silo desde el diseño) se evaluó y se descarta
+por ahora — con 0 clínicas reales hoy, construir la capacidad de silo desde el día 1 es esfuerzo
+sin demanda demostrada; la ruta de escape pool→silo documentada abajo cubre ese caso si aparece.
+El enforcement de 3 capas (ADR-006) se ratifica también sin cambios sobre lo ya redactado.
 
 ## Propagación del contexto de tenant
 
@@ -230,14 +229,34 @@ Tener esta ruta escrita, aunque nunca se ejecute, es lo que distingue un diseño
 ## Datos cross-tenant por diseño
 
 Explícitamente **no** llevan `tenant_id` y son compartidos entre todas las clínicas:
-- Catálogo de especialidades médicas (si se centraliza; hoy `Doctor.specialty` es texto libre por
-  clínica, a decidir si se normaliza a un catálogo global en la Fase 3).
+- **Catálogo de especialidades médicas** — decidido (2026-07-29): se normaliza `Doctor.specialty`
+  de texto libre a un catálogo global cross-tenant en la Fase 3 (`MedicalSpecialty`, sin
+  `tenant_id`, referenciado por FK desde `Doctor`). Cada clínica selecciona de la lista, no escribe
+  texto libre. Esto habilita reportes agregados de plataforma por especialidad y hace explícito,
+  en el propio modelo de datos, cuáles especialidades entran en la banda de severidad máxima del
+  threat model (amenaza #15) sin depender de comparar strings libres.
 - Plantillas de notificación por defecto (Notifications) — una clínica puede personalizarlas,
   pero el default es global.
 - Plano de control de tenants (`tenant-provisioning`, Fase 8) — por definición vive fuera del
   contexto de un tenant específico.
 - Métricas agregadas de plataforma (dashboards ejecutivos de Fase 6, agregados across-tenant para
   el equipo de la plataforma, nunca expuestos a una clínica individual).
+
+## Usuarios de plataforma en el modelo de datos
+
+Decidido (2026-07-29): `User.tenant_id` en Auth es **nullable**; `NULL` identifica exclusivamente
+a los roles de plataforma (`platform_admin`/`platform_support`, RFC-004) — no es un tenant más,
+es la ausencia explícita de tenant. Se prefirió esto sobre una tabla `PlatformUser` separada para
+no duplicar el modelo de autenticación (login, refresh tokens, JWKS) que ya funciona en Auth.
+
+**Consecuencia directa para RLS (ADR-006):** la política de Postgres sobre `User` no puede ser un
+simple `tenant_id = current_setting('app.current_tenant')` — debe permitir explícitamente que un
+actor con rol de plataforma (verificado por el claim de rol del JWT, no por la sola ausencia de
+tenant) opere sin ese filtro, mientras que un `tenant_id` `NULL` nunca debe ser alcanzable por un
+actor de tenant normal. Esto es una excepción justificada y documentada a la regla general de RLS,
+no un bypass silencioso — debe implementarse como una segunda política explícita en la tabla
+`User` (`USING (tenant_id IS NULL AND current_setting('app.actor_role') IN ('platform_admin',
+'platform_support'))` o equivalente), no como `BYPASSRLS` en el rol de aplicación.
 
 ## Riesgos
 
@@ -251,13 +270,7 @@ Explícitamente **no** llevan `tenant_id` y son compartidos entre todas las clí
 
 ## Preguntas abiertas para el humano
 
-1. ¿Se ratifica la Opción A (shared DB + tenant_id + RLS) como decisión final, o se prefiere la
-   Opción D (híbrido desde el diseño) dado que el pricing objetivo es austero pero el modelo de
-   negocio SaaS B2B de salud suele atraer clientes grandes que piden aislamiento dedicado por
-   contrato?
-2. `Doctor.specialty` como texto libre por clínica vs. catálogo global normalizado — afecta
-   directamente si "catálogo de especialidades" es o no cross-tenant. Requiere decisión antes de
-   escribir la migración de la Fase 3.
-3. Los roles `platform_admin`/`platform_support` (RFC-004) no pertenecen a ningún tenant — ¿el
-   modelo de datos de `User` en Auth soporta `tenant_id` nullable para estos roles, o viven en una
-   tabla separada? Afecta el diff de la Opción A sobre `services/auth/prisma/schema.prisma`.
+Todas las preguntas abiertas originales de este RFC se resolvieron el 2026-07-29 (ver "Decisión",
+"Datos cross-tenant por diseño" y "Usuarios de plataforma en el modelo de datos" arriba). Sin
+preguntas pendientes para pasar a la Fase 3, salvo las que surjan al implementar la política RLS
+de excepción para `User.tenant_id IS NULL`.
