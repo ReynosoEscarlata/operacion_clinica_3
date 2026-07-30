@@ -65,8 +65,26 @@ export class DoctorService {
   ) {}
 
   async create(dto: CreateDoctorDto): Promise<Doctor> {
+    // El contrato público sigue recibiendo `specialty` como texto (sin
+    // romper packages/contracts/doctors/openapi.yaml) pero ahora se resuelve
+    // contra el catálogo MedicalSpecialty (RFC-003) -- ya no es texto libre
+    // persistido tal cual, es una FK validada.
+    const specialty = await this.repository.findSpecialtyByName(dto.specialty);
+    if (!specialty) {
+      throw new AppError(
+        400,
+        'INVALID_SPECIALTY',
+        `La especialidad "${dto.specialty}" no existe en el catálogo`,
+      );
+    }
+
     const consultationPriceCents = resolveConsultationPrice(dto.specialty, dto.consultationPriceCents);
-    const doctor = await this.repository.create({ ...dto, consultationPriceCents });
+    const doctor = await this.repository.create({
+      name: dto.name,
+      email: dto.email,
+      specialtyId: specialty.id,
+      consultationPriceCents,
+    });
     this.logger.info({ doctorId: doctor.id, consultationPriceCents }, 'Doctor creado');
     return doctor;
   }

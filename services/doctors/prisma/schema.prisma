@@ -7,20 +7,45 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// Catálogo global cross-tenant (RFC-003-tenancy.md, decidido 2026-07-29): sin
+// tenantId a propósito. Reemplaza Doctor.specialty (antes texto libre por
+// clínica) para que "especialidad sensible" (threat model, amenaza #15) sea
+// una referencia explícita, no una comparación de strings libres.
+model MedicalSpecialty {
+  id   String @id @default(uuid()) @db.Uuid
+  name String @unique
+
+  doctors Doctor[]
+}
+
+// tenantId NOT NULL: un doctor siempre pertenece a una clínica. RLS de este
+// modelo es asimétrico a propósito (ver migración SQL): lectura pública
+// (directorio de doctores, necesario para que un paciente sin cuenta pueda
+// elegir con quién reservar antes de que exista cualquier contexto de
+// tenant — confirmado con Ricardo en Fase 3a), escritura estrictamente
+// scoped al tenant del actor autenticado.
 model Doctor {
   id                     String   @id @default(uuid()) @db.Uuid
+  tenantId               String   @db.Uuid
   name                   String
   email                  String
-  specialty              String
+  specialtyId            String   @db.Uuid
   consultationPriceCents Int      @default(50000)
   createdAt              DateTime @default(now())
   updatedAt              DateTime @updatedAt
 
+  specialty      MedicalSpecialty @relation(fields: [specialtyId], references: [id])
   availabilities Availability[]
+
+  @@index([tenantId])
 }
 
+// tenantId denormalizado desde Doctor (mismo motivo que RefreshToken en
+// Auth: la política RLS no debe depender de un JOIN). Misma asimetría
+// lectura-pública/escritura-privada que Doctor.
 model Availability {
   id        String @id @default(uuid()) @db.Uuid
+  tenantId  String @db.Uuid
   doctorId  String @db.Uuid
   dayOfWeek Int
   startTime String
@@ -28,20 +53,23 @@ model Availability {
 
   doctor Doctor @relation(fields: [doctorId], references: [id], onDelete: Cascade)
 
-  @@index([doctorId])
+  @@index([tenantId, doctorId])
 }
 
 // Outbox (ADR-002): DoctorCreated/DoctorUpdated se escriben en la misma
-// transacción que el cambio. El relay a Redis Streams los publica;
-// Appointments los consulta vía HTTP síncrono para slots (ADR-001, es una
-// query), pero Notifications los consume async para su DoctorSnapshot
-// (RFC-001 decisión 4).
+// transacción que el cambio. El relay (SQS/SNS, Fase 3b, ADR-014) los
+// publica; Appointments los consulta vía HTTP síncrono para slots (ADR-001,
+// es una query), pero Notifications los consume async para su
+// DoctorSnapshot (RFC-001 decisión 4). tenantId NOT NULL: todo evento de
+// este servicio pertenece a un doctor, y todo doctor a un tenant.
 model OutboxEvent {
   id          String    @id @default(uuid()) @db.Uuid
+  tenantId    String    @db.Uuid
   type        String
   payload     Json
   publishedAt DateTime?
   createdAt   DateTime  @default(now())
 
+  @@index([tenantId])
   @@index([publishedAt])
 }

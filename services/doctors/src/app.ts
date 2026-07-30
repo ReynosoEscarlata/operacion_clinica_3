@@ -6,6 +6,7 @@ import { prisma as defaultPrisma } from './config/prisma.js';
 import { errorHandler } from './middleware/error-handler.js';
 import { registerMetricsMiddleware } from './middleware/metrics.js';
 import { registerRequestId } from './middleware/request-id.js';
+import { registerTenantContext } from './middleware/tenant-context.js';
 import { registerDoctorRoutes, type DoctorRoutesDeps } from './modules/doctors/index.js';
 import { registerHealthRoute } from './routes/health.js';
 import { registerMetricsRoute } from './routes/metrics.js';
@@ -22,6 +23,7 @@ export const buildApp = async (deps: BuildAppDeps = {}): Promise<FastifyInstance
 
   await app.register(cors);
   registerRequestId(app);
+  registerTenantContext(app);
   registerMetricsMiddleware(app);
   app.setErrorHandler(errorHandler);
 

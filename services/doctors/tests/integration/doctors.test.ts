@@ -5,6 +5,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { buildApp } from '../../src/app.js';
 import { prisma } from '../../src/config/prisma.js';
+import { withTenantId } from '../../src/lib/tenant-scoped.js';
 
 // A propósito NO usa toISOString().slice(0,10): eso da la fecha en UTC, que
 // puede ser un día distinto a la fecha LOCAL si el huso horario está
@@ -17,6 +18,12 @@ const toLocalDateString = (date: Date): string => {
   return `${year}-${month}-${day}`;
 };
 
+// Tenant fijo de este archivo (RLS activo, Fase 3a). Solo las MUTACIONES
+// (create/addAvailability) requieren este header -- el directorio de
+// doctores es público por diseño, ver tenant-context.ts middleware.
+const TEST_TENANT_ID = '66666666-6666-6666-6666-666666666666';
+const TENANT_HEADERS = { 'x-internal-tenant-id': TEST_TENANT_ID };
+
 describe('Doctors CRUD + slots (integración con DB real)', () => {
   let app: FastifyInstance;
   let doctorId: string;
@@ -28,8 +35,10 @@ describe('Doctors CRUD + slots (integración con DB real)', () => {
 
   afterAll(async () => {
     if (doctorId) {
-      await prisma.availability.deleteMany({ where: { doctorId } });
-      await prisma.doctor.delete({ where: { id: doctorId } }).catch(() => undefined);
+      await withTenantId(prisma, TEST_TENANT_ID, async (tx) => {
+        await tx.availability.deleteMany({ where: { doctorId } });
+        await tx.doctor.delete({ where: { id: doctorId } }).catch(() => undefined);
+      });
     }
     await app.close();
     await prisma.$disconnect();
@@ -39,15 +48,19 @@ describe('Doctors CRUD + slots (integración con DB real)', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/v1/doctors',
+      headers: TENANT_HEADERS,
       payload: { name: 'Dr. Test', email: `doctor-${randomUUID()}@example.com`, specialty: 'Cardiología' },
     });
 
     expect(response.statusCode).toBe(201);
     const body = response.json();
     expect(body.consultationPriceCents).toBe(80_000);
+    expect(body.tenantId).toBe(TEST_TENANT_ID);
     doctorId = body.id;
 
-    const events = await prisma.outboxEvent.findMany({ where: { type: 'DoctorCreated' } });
+    const events = await withTenantId(prisma, TEST_TENANT_ID, (tx) =>
+      tx.outboxEvent.findMany({ where: { type: 'DoctorCreated' } }),
+    );
     const match = events.find((event) => (event.payload as { doctorId?: string }).doctorId === doctorId);
     expect(match).toBeDefined();
   });
@@ -56,6 +69,7 @@ describe('Doctors CRUD + slots (integración con DB real)', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/v1/doctors',
+      headers: TENANT_HEADERS,
       payload: {
         name: 'Dr. Precio Custom',
         email: `doctor-${randomUUID()}@example.com`,
@@ -65,7 +79,19 @@ describe('Doctors CRUD + slots (integración con DB real)', () => {
     });
 
     expect(response.json().consultationPriceCents).toBe(99_000);
-    await prisma.doctor.delete({ where: { id: response.json().id } });
+    await withTenantId(prisma, TEST_TENANT_ID, (tx) =>
+      tx.doctor.delete({ where: { id: response.json().id } }),
+    );
+  });
+
+  it('rechaza crear un doctor sin contexto de tenant', async () => {
+    const response = await app.inject({
+      method: 'POST',
+      url: '/v1/doctors',
+      payload: { name: 'Sin Tenant', email: `doctor-${randomUUID()}@example.com`, specialty: 'Cardiología' },
+    });
+
+    expect(response.statusCode).toBe(401);
   });
 
   it('retorna 404 al buscar un doctor inexistente', async () => {
@@ -78,12 +104,15 @@ describe('Doctors CRUD + slots (integración con DB real)', () => {
     const response = await app.inject({
       method: 'POST',
       url: `/v1/doctors/${doctorId}/availability`,
+      headers: TENANT_HEADERS,
       payload: { dayOfWeek: 1, startTime: '09:00', endTime: '12:00' },
     });
 
     expect(response.statusCode).toBe(201);
 
-    const events = await prisma.outboxEvent.findMany({ where: { type: 'DoctorUpdated' } });
+    const events = await withTenantId(prisma, TEST_TENANT_ID, (tx) =>
+      tx.outboxEvent.findMany({ where: { type: 'DoctorUpdated' } }),
+    );
     const match = events.find((event) => (event.payload as { doctorId?: string }).doctorId === doctorId);
     expect(match).toBeDefined();
   });
@@ -92,6 +121,7 @@ describe('Doctors CRUD + slots (integración con DB real)', () => {
     const response = await app.inject({
       method: 'POST',
       url: `/v1/doctors/${doctorId}/availability`,
+      headers: TENANT_HEADERS,
       payload: { dayOfWeek: 1, startTime: '12:00', endTime: '09:00' },
     });
 
@@ -99,7 +129,7 @@ describe('Doctors CRUD + slots (integración con DB real)', () => {
     expect(response.json().error.code).toBe('INVALID_AVAILABILITY_BLOCK');
   });
 
-  it('calcula los slots disponibles como ISO datetimes para el día configurado', async () => {
+  it('calcula los slots disponibles como ISO datetimes para el día configurado (ruta pública, sin tenant)', async () => {
     const monday = new Date();
     monday.setDate(monday.getDate() + ((1 - monday.getDay() + 7) % 7 || 7));
     const dateStr = toLocalDateString(monday);
@@ -140,7 +170,7 @@ describe('Doctors CRUD + slots (integración con DB real)', () => {
     expect(response.json().error.code).toBe('PAST_DATE');
   });
 
-  it('lista doctores incluyendo el recién creado', async () => {
+  it('lista doctores incluyendo el recién creado (ruta pública, sin tenant)', async () => {
     const response = await app.inject({ method: 'GET', url: '/v1/doctors' });
 
     expect(response.statusCode).toBe(200);

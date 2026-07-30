@@ -5,6 +5,9 @@ const schema = z.object({
   PORT: z.coerce.number().default(4003),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace']).default('info'),
   DATABASE_URL: z.string().min(1),
+  // Rol restringido (sin BYPASSRLS, ADR-006) -- ver
+  // docs/runbooks/migracion-tenant-id.md.
+  DATABASE_URL_APP: z.string().min(1),
   REDIS_URL: z.string().min(1),
   SENTRY_DSN: z.string().optional().default(''),
 });
