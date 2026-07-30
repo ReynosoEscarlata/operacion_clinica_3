@@ -9,7 +9,8 @@
   "workspaces": [
     "services/*",
     "gateway",
-    "packages/authz"
+    "packages/authz",
+    "packages/messaging"
   ],
   "scripts": {
     "dev": "tsx watch src/server.ts",
