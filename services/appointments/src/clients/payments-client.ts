@@ -1,4 +1,6 @@
 import { AppError } from '../lib/app-error.js';
+import { TENANT_ID_HEADER } from '../lib/constants.js';
+import { getTenantId } from '../lib/tenant-context.js';
 
 export interface PaymentIntentResult {
   id: string;
@@ -43,9 +45,18 @@ export const buildHttpPaymentsClient = (baseUrl: string): PaymentsClient => ({
   },
 
   createPaymentIntent: async (appointmentId, amountCents, patientStripeCustomerId) => {
+    // Llamada directa servicio-a-servicio (no pasa por el gateway): el
+    // tenant ambiental de este request se reenvía explícitamente, mismo
+    // header que usaría el gateway si viniera de un JWT verificado -- así
+    // Payments puede incluirlo en el metadata del PaymentIntent sin volver
+    // a consultarnos (RFC-001, cero estado compartido).
+    const tenantId = getTenantId();
     const response = await fetch(`${baseUrl}/v1/payment-intents`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: {
+        'content-type': 'application/json',
+        ...(tenantId ? { [TENANT_ID_HEADER]: tenantId } : {}),
+      },
       body: JSON.stringify({
         appointmentId,
         amountCents,

@@ -6,8 +6,10 @@ import { afterAll, describe, expect, it } from 'vitest';
 import { buildApp } from '../../src/app.js';
 import { prisma } from '../../src/config/prisma.js';
 import { stripe } from '../../src/config/stripe.js';
+import { withTenantId } from '../../src/lib/tenant-scoped.js';
 
 const TEST_WEBHOOK_SECRET = 'whsec_test_secret_for_webhook_tests';
+const TEST_TENANT_ID = '33333333-3333-3333-3333-333333333333';
 
 const buildStripeEvent = (type: string, object: Record<string, unknown>): Record<string, unknown> => ({
   id: `evt_${randomUUID()}`,
@@ -63,7 +65,7 @@ describe('POST /v1/webhooks/stripe (integración con DB real)', () => {
     const event = buildStripeEvent('payment_intent.succeeded', {
       id: 'pi_test_1',
       amount: 50_000,
-      metadata: { appointmentId },
+      metadata: { appointmentId, tenantId: TEST_TENANT_ID },
     });
     const { rawBody, signature } = signPayload(event);
 
@@ -76,14 +78,16 @@ describe('POST /v1/webhooks/stripe (integración con DB real)', () => {
 
     expect(response.statusCode).toBe(200);
 
-    const events = await prisma.outboxEvent.findMany({ where: { type: 'PaymentSucceeded' } });
+    const events = await withTenantId(prisma, TEST_TENANT_ID, (tx) =>
+      tx.outboxEvent.findMany({ where: { type: 'PaymentSucceeded' } }),
+    );
     const match = events.find((e) => (e.payload as { appointmentId?: string }).appointmentId === appointmentId);
     expect(match).toBeDefined();
     expect((match?.payload as { paymentIntentId?: string }).paymentIntentId).toBe('pi_test_1');
 
-    const webhookEvent = await prisma.webhookEvent.findUnique({
-      where: { stripeEventId: event.id as string },
-    });
+    const webhookEvent = await withTenantId(prisma, TEST_TENANT_ID, (tx) =>
+      tx.webhookEvent.findUnique({ where: { stripeEventId: event.id as string } }),
+    );
     expect(webhookEvent?.processedAt).not.toBeNull();
   });
 
@@ -92,7 +96,7 @@ describe('POST /v1/webhooks/stripe (integración con DB real)', () => {
     const event = buildStripeEvent('payment_intent.succeeded', {
       id: 'pi_test_2',
       amount: 30_000,
-      metadata: { appointmentId },
+      metadata: { appointmentId, tenantId: TEST_TENANT_ID },
     });
     const { rawBody, signature } = signPayload(event);
 
@@ -109,7 +113,9 @@ describe('POST /v1/webhooks/stripe (integración con DB real)', () => {
       payload: rawBody,
     });
 
-    const events = await prisma.outboxEvent.findMany({ where: { type: 'PaymentSucceeded' } });
+    const events = await withTenantId(prisma, TEST_TENANT_ID, (tx) =>
+      tx.outboxEvent.findMany({ where: { type: 'PaymentSucceeded' } }),
+    );
     const matches = events.filter(
       (e) => (e.payload as { appointmentId?: string }).appointmentId === appointmentId,
     );
@@ -120,7 +126,7 @@ describe('POST /v1/webhooks/stripe (integración con DB real)', () => {
     const appointmentId = randomUUID();
     const event = buildStripeEvent('payment_intent.payment_failed', {
       id: 'pi_test_3',
-      metadata: { appointmentId },
+      metadata: { appointmentId, tenantId: TEST_TENANT_ID },
       last_payment_error: { message: 'Tarjeta rechazada' },
     });
     const { rawBody, signature } = signPayload(event);
@@ -134,7 +140,9 @@ describe('POST /v1/webhooks/stripe (integración con DB real)', () => {
 
     expect(response.statusCode).toBe(200);
 
-    const events = await prisma.outboxEvent.findMany({ where: { type: 'PaymentFailed' } });
+    const events = await withTenantId(prisma, TEST_TENANT_ID, (tx) =>
+      tx.outboxEvent.findMany({ where: { type: 'PaymentFailed' } }),
+    );
     const match = events.find((e) => (e.payload as { appointmentId?: string }).appointmentId === appointmentId);
     expect(match).toBeDefined();
     expect((match?.payload as { reason?: string }).reason).toBe('Tarjeta rechazada');
@@ -152,6 +160,29 @@ describe('POST /v1/webhooks/stripe (integración con DB real)', () => {
     });
 
     expect(response.statusCode).toBe(200);
+  });
+
+  it('ignora sin error un PaymentIntent con appointmentId pero sin tenantId en metadata', async () => {
+    const appointmentId = randomUUID();
+    const event = buildStripeEvent('payment_intent.succeeded', {
+      id: 'pi_test_5',
+      amount: 10_000,
+      metadata: { appointmentId },
+    });
+    const { rawBody, signature } = signPayload(event);
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/v1/webhooks/stripe',
+      headers: { 'stripe-signature': signature, 'content-type': 'application/json' },
+      payload: rawBody,
+    });
+
+    expect(response.statusCode).toBe(200);
+
+    const webhookEvent = await prisma.webhookEvent.findUnique({ where: { stripeEventId: event.id as string } });
+    expect(webhookEvent?.tenantId).toBeNull();
+    expect(webhookEvent?.processedAt).not.toBeNull();
   });
 
   it('ignora sin error un tipo de evento sin manejador específico', async () => {

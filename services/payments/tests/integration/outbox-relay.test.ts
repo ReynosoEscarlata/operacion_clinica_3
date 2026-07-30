@@ -6,6 +6,9 @@ import { prisma } from '../../src/config/prisma.js';
 import { redis } from '../../src/config/redis.js';
 import { DOMAIN_EVENTS_STREAM, runOutboxRelayOnce } from '../../src/lib/outbox-relay.js';
 import { logger } from '../../src/lib/logger.js';
+import { withTenantId } from '../../src/lib/tenant-scoped.js';
+
+const TEST_TENANT_ID = '44444444-4444-4444-4444-444444444444';
 
 describe('Outbox relay (Postgres + Redis Streams reales)', () => {
   afterAll(async () => {
@@ -13,16 +16,20 @@ describe('Outbox relay (Postgres + Redis Streams reales)', () => {
     redis.disconnect();
   });
 
-  it('publica eventos no publicados al stream y marca publishedAt', async () => {
+  it('publica eventos no publicados al stream y marca publishedAt, cruzando tenants', async () => {
     const marker = randomUUID();
-    const event = await prisma.outboxEvent.create({
-      data: { type: 'PaymentSucceeded', payload: { marker, appointmentId: 'apt-1' } },
-    });
+    const event = await withTenantId(prisma, TEST_TENANT_ID, (tx) =>
+      tx.outboxEvent.create({
+        data: { tenantId: TEST_TENANT_ID, type: 'PaymentSucceeded', payload: { marker, appointmentId: 'apt-1' } },
+      }),
+    );
 
     const published = await runOutboxRelayOnce({ prisma, redis, logger });
     expect(published).toBeGreaterThanOrEqual(1);
 
-    const updated = await prisma.outboxEvent.findUnique({ where: { id: event.id } });
+    const updated = await withTenantId(prisma, TEST_TENANT_ID, (tx) =>
+      tx.outboxEvent.findUnique({ where: { id: event.id } }),
+    );
     expect(updated?.publishedAt).not.toBeNull();
 
     const entries = await redis.xrange(DOMAIN_EVENTS_STREAM, '-', '+');
@@ -32,9 +39,11 @@ describe('Outbox relay (Postgres + Redis Streams reales)', () => {
 
   it('no vuelve a publicar un evento ya publicado', async () => {
     const marker = randomUUID();
-    await prisma.outboxEvent.create({
-      data: { type: 'PaymentFailed', payload: { marker }, publishedAt: new Date() },
-    });
+    await withTenantId(prisma, TEST_TENANT_ID, (tx) =>
+      tx.outboxEvent.create({
+        data: { tenantId: TEST_TENANT_ID, type: 'PaymentFailed', payload: { marker }, publishedAt: new Date() },
+      }),
+    );
 
     const published = await runOutboxRelayOnce({ prisma, redis, logger });
 

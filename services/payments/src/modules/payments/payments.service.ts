@@ -49,13 +49,17 @@ export class PaymentsService {
     appointmentId: string,
     amountCents: number,
     patientStripeCustomerId: string | null,
+    tenantId?: string | null,
   ): Promise<CreatePaymentIntentResult> {
     try {
       const paymentIntent = await this.stripeClient.paymentIntents.create({
         amount: amountCents,
         currency: 'mxn',
         ...(patientStripeCustomerId ? { customer: patientStripeCustomerId } : {}),
-        metadata: { appointmentId },
+        // tenantId viaja en el metadata (junto a appointmentId) para que el
+        // webhook pueda resolverlo sin volver a consultar a Appointments
+        // (RFC-001, cero estado compartido) -- ver webhook.service.ts.
+        metadata: { appointmentId, ...(tenantId ? { tenantId } : {}) },
         automatic_payment_methods: { enabled: true },
       });
       return { id: paymentIntent.id, clientSecret: paymentIntent.client_secret };

@@ -7,6 +7,7 @@ import { errorHandler } from './middleware/error-handler.js';
 import { registerMetricsMiddleware } from './middleware/metrics.js';
 import { registerRawBodyCapture } from './middleware/raw-body.js';
 import { registerRequestId } from './middleware/request-id.js';
+import { registerTenantContext } from './middleware/tenant-context.js';
 import { registerPaymentsRoutes, type PaymentsRoutesDeps } from './modules/payments/index.js';
 import { registerHealthRoute } from './routes/health.js';
 import { registerMetricsRoute } from './routes/metrics.js';
@@ -24,6 +25,7 @@ export const buildApp = async (deps: BuildAppDeps = {}): Promise<FastifyInstance
   await app.register(cors);
   registerRawBodyCapture(app);
   registerRequestId(app);
+  registerTenantContext(app);
   registerMetricsMiddleware(app);
   app.setErrorHandler(errorHandler);
 

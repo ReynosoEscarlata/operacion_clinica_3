@@ -11,13 +11,24 @@ datasource db {
 // antes de procesar, marcando processedAt al terminar. Si el insert falla
 // por unique constraint, el evento ya fue reclamado por otra instancia/
 // reintento y se ignora.
+//
+// tenantId NULLABLE (a diferencia de OutboxEvent): Stripe manda TODOS los
+// tipos de evento a un único endpoint de webhook compartido por tenants, y
+// no todo evento trae un PaymentIntent con metadata.tenantId resoluble (ej.
+// un tipo de evento sin manejador, o un PaymentIntent creado antes de esta
+// migración). Esta tabla es puramente de idempotencia/auditoría interna
+// -- ningún endpoint la expone por tenant -- así que NULL simplemente
+// significa "tenant no resuelto", no "plataforma" (RLS más abajo).
 model WebhookEvent {
   id            String    @id @default(uuid()) @db.Uuid
+  tenantId      String?   @db.Uuid
   stripeEventId String    @unique
   type          String
   payload       Json
   processedAt   DateTime?
   createdAt     DateTime  @default(now())
+
+  @@index([tenantId])
 }
 
 // Outbox (ADR-002): PaymentSucceeded/PaymentFailed/RefundIssued se escriben
@@ -25,12 +36,15 @@ model WebhookEvent {
 // WebhookEvent como procesado. El relay a Redis Streams (Fase 3) los
 // publica; Appointments los consume para avanzar su propia state machine
 // — Payments nunca toca la BD de Appointments directamente (RFC-001).
+// tenantId NOT NULL: solo se escribe cuando el handler ya resolvió el
+// tenant desde el metadata del PaymentIntent (ver webhook.service.ts).
 model OutboxEvent {
   id          String    @id @default(uuid()) @db.Uuid
+  tenantId    String    @db.Uuid
   type        String
   payload     Json
   publishedAt DateTime?
   createdAt   DateTime  @default(now())
 
-  @@index([publishedAt])
+  @@index([tenantId, publishedAt])
 }

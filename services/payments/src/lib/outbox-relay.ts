@@ -19,15 +19,27 @@ export interface OutboxRelayDeps {
 
 const DEFAULT_BATCH_SIZE = 50;
 
+interface OutboxEventRow {
+  id: string;
+  type: string;
+  payload: unknown;
+}
+
 // Una sola pasada: lee eventos no publicados, los manda al stream y marca
 // publishedAt. Expuesto por separado de startOutboxRelay para poder
 // probarlo sin esperar a un setInterval.
+//
+// Cross-tenant por diseño (job de sistema, no una request de un tenant
+// particular): usa las funciones SECURITY DEFINER
+// list_unpublished_outbox_events/mark_outbox_event_published (ver
+// migration.sql) en vez de `prisma.outboxEvent.*` directo -- con FORCE ROW
+// LEVEL SECURITY activo y sin ningún app.current_tenant seteado en esta
+// conexión, una query directa nunca vería ninguna fila y el relay dejaría
+// de publicar eventos en silencio.
 export const runOutboxRelayOnce = async (deps: OutboxRelayDeps): Promise<number> => {
-  const pending = await deps.prisma.outboxEvent.findMany({
-    where: { publishedAt: null },
-    orderBy: { createdAt: 'asc' },
-    take: deps.batchSize ?? DEFAULT_BATCH_SIZE,
-  });
+  const pending = await deps.prisma.$queryRaw<OutboxEventRow[]>`
+    SELECT * FROM list_unpublished_outbox_events(${deps.batchSize ?? DEFAULT_BATCH_SIZE}::int)
+  `;
 
   for (const event of pending) {
     await deps.redis.xadd(
@@ -41,10 +53,7 @@ export const runOutboxRelayOnce = async (deps: OutboxRelayDeps): Promise<number>
       JSON.stringify(event.payload),
     );
 
-    await deps.prisma.outboxEvent.update({
-      where: { id: event.id },
-      data: { publishedAt: new Date() },
-    });
+    await deps.prisma.$executeRaw`SELECT mark_outbox_event_published(${event.id}::uuid)`;
   }
 
   if (pending.length > 0) {

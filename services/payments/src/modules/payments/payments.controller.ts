@@ -1,5 +1,6 @@
 import type { FastifyReply, FastifyRequest } from 'fastify';
 
+import { getTenantId } from '../../lib/tenant-context.js';
 import type {
   CreateCustomerDto,
   CreatePaymentIntentDto,
@@ -27,6 +28,7 @@ export class PaymentsController {
       request.body.appointmentId,
       request.body.amountCents,
       request.body.patientStripeCustomerId,
+      getTenantId() ?? null,
     );
     reply.status(201).send({ id: result.id, clientSecret: result.clientSecret });
   };
