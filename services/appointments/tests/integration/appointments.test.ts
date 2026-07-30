@@ -6,10 +6,14 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { buildApp } from '../../src/app.js';
 import { prisma } from '../../src/config/prisma.js';
 import { AppError } from '../../src/lib/app-error.js';
+import { withTenantId } from '../../src/lib/tenant-scoped.js';
 import type { DoctorsClient } from '../../src/clients/doctors-client.js';
 import type { PaymentsClient } from '../../src/clients/payments-client.js';
 
 const CONSULTATION_PRICE_CENTS = 70_000;
+
+const TEST_TENANT_ID = '99999999-9999-9999-9999-999999999999';
+const TENANT_HEADERS = { 'x-internal-tenant-id': TEST_TENANT_ID };
 
 // Bloques de 30 minutos a partir de las 09:00 del día siguiente, dentro de
 // "disponibilidad" simulada del doctor fake (09:00-12:00).
@@ -22,7 +26,9 @@ const buildSlotDateTime = (hour: number, minute: number): Date => {
 
 const buildFakeDoctorsClient = (doctorId: string): DoctorsClient => ({
   getDoctor: vi.fn().mockImplementation(async (id: string) =>
-    id === doctorId ? { id: doctorId, consultationPriceCents: CONSULTATION_PRICE_CENTS } : null,
+    id === doctorId
+      ? { id: doctorId, tenantId: TEST_TENANT_ID, consultationPriceCents: CONSULTATION_PRICE_CENTS }
+      : null,
   ),
   getAvailableSlots: vi.fn().mockImplementation(async () => {
     const slots: string[] = [];
@@ -51,14 +57,17 @@ describe('Appointments (integración con DB real, Doctors/Payments mockeados)', 
   const createdAppointmentIds: string[] = [];
 
   beforeAll(async () => {
-    const patient = await prisma.patient.create({
-      data: {
-        email: `apt-patient-${randomUUID()}@example.com`,
-        name: 'Paciente Test',
-        phone: '+54 9 11 5555-2222',
-        stripeCustomerId: 'cus_test_123',
-      },
-    });
+    const patient = await withTenantId(prisma, TEST_TENANT_ID, (tx) =>
+      tx.patient.create({
+        data: {
+          tenantId: TEST_TENANT_ID,
+          email: `apt-patient-${randomUUID()}@example.com`,
+          name: 'Paciente Test',
+          phone: '+54 9 11 5555-2222',
+          stripeCustomerId: 'cus_test_123',
+        },
+      }),
+    );
     patientId = patient.id;
 
     fakePaymentsClient = buildFakePaymentsClient();
@@ -74,10 +83,12 @@ describe('Appointments (integración con DB real, Doctors/Payments mockeados)', 
   });
 
   afterAll(async () => {
-    if (createdAppointmentIds.length > 0) {
-      await prisma.appointment.deleteMany({ where: { id: { in: createdAppointmentIds } } });
-    }
-    await prisma.patient.delete({ where: { id: patientId } }).catch(() => undefined);
+    await withTenantId(prisma, TEST_TENANT_ID, async (tx) => {
+      if (createdAppointmentIds.length > 0) {
+        await tx.appointment.deleteMany({ where: { id: { in: createdAppointmentIds } } });
+      }
+      await tx.patient.delete({ where: { id: patientId } }).catch(() => undefined);
+    });
     await app.close();
     await prisma.$disconnect();
   });
@@ -101,7 +112,9 @@ describe('Appointments (integración con DB real, Doctors/Payments mockeados)', 
     );
     createdAppointmentIds.push(body.appointment.id);
 
-    const events = await prisma.outboxEvent.findMany({ where: { type: 'AppointmentCreated' } });
+    const events = await withTenantId(prisma, TEST_TENANT_ID, (tx) =>
+      tx.outboxEvent.findMany({ where: { type: 'AppointmentCreated' } }),
+    );
     const match = events.find(
       (event) => (event.payload as { appointmentId?: string }).appointmentId === body.appointment.id,
     );
@@ -186,7 +199,9 @@ describe('Appointments (integración con DB real, Doctors/Payments mockeados)', 
     expect(response.statusCode).toBe(502);
     expect(response.json().error.code).toBe('PAYMENTS_UNAVAILABLE');
 
-    const orphaned = await prisma.appointment.findFirst({ where: { doctorId, dateTime } });
+    const orphaned = await withTenantId(prisma, TEST_TENANT_ID, (tx) =>
+      tx.appointment.findFirst({ where: { doctorId, dateTime } }),
+    );
     expect(orphaned).toBeNull();
 
     await failingApp.close();
@@ -207,6 +222,7 @@ describe('Appointments (integración con DB real, Doctors/Payments mockeados)', 
     const response = await app.inject({
       method: 'GET',
       url: `/v1/appointments?doctorId=${doctorId}&status=CONFIRMED`,
+      headers: TENANT_HEADERS,
     });
 
     expect(response.statusCode).toBe(200);
@@ -218,22 +234,26 @@ describe('Appointments (integración con DB real, Doctors/Payments mockeados)', 
     const baseDateTime = buildSlotDateTime(8, 0);
     const pageDoctorId = randomUUID();
     for (let i = 0; i < 3; i += 1) {
-      const appointment = await prisma.appointment.create({
-        data: {
-          patientId,
-          doctorId: pageDoctorId,
-          dateTime: new Date(baseDateTime.getTime() + i * 60_000),
-          durationMinutes: 30,
-          amountCents: CONSULTATION_PRICE_CENTS,
-          status: 'PENDING',
-        },
-      });
+      const appointment = await withTenantId(prisma, TEST_TENANT_ID, (tx) =>
+        tx.appointment.create({
+          data: {
+            tenantId: TEST_TENANT_ID,
+            patientId,
+            doctorId: pageDoctorId,
+            dateTime: new Date(baseDateTime.getTime() + i * 60_000),
+            durationMinutes: 30,
+            amountCents: CONSULTATION_PRICE_CENTS,
+            status: 'PENDING',
+          },
+        }),
+      );
       createdAppointmentIds.push(appointment.id);
     }
 
     const firstPage = await app.inject({
       method: 'GET',
       url: `/v1/appointments?doctorId=${pageDoctorId}`,
+      headers: TENANT_HEADERS,
     });
     expect(firstPage.statusCode).toBe(200);
     const firstBody = firstPage.json() as { items: Array<{ id: string }>; nextCursor: string | null };
@@ -271,17 +291,20 @@ describe('Appointments (integración con DB real, Doctors/Payments mockeados)', 
     const farDateTime = buildSlotDateTime(11, 0);
     farDateTime.setDate(farDateTime.getDate() + 14);
 
-    const appointment = await prisma.appointment.create({
-      data: {
-        patientId,
-        doctorId,
-        dateTime: farDateTime,
-        durationMinutes: 30,
-        amountCents: CONSULTATION_PRICE_CENTS,
-        status: 'PAID',
-        stripePaymentIntentId: `pi_${randomUUID()}`,
-      },
-    });
+    const appointment = await withTenantId(prisma, TEST_TENANT_ID, (tx) =>
+      tx.appointment.create({
+        data: {
+          tenantId: TEST_TENANT_ID,
+          patientId,
+          doctorId,
+          dateTime: farDateTime,
+          durationMinutes: 30,
+          amountCents: CONSULTATION_PRICE_CENTS,
+          status: 'PAID',
+          stripePaymentIntentId: `pi_${randomUUID()}`,
+        },
+      }),
+    );
     createdAppointmentIds.push(appointment.id);
 
     const response = await app.inject({
@@ -301,16 +324,19 @@ describe('Appointments (integración con DB real, Doctors/Payments mockeados)', 
   });
 
   it('registra cancelledBy: ADMIN cuando el gateway reenvía el rol del JWT', async () => {
-    const appointment = await prisma.appointment.create({
-      data: {
-        patientId,
-        doctorId,
-        dateTime: buildSlotDateTime(11, 0),
-        durationMinutes: 30,
-        amountCents: CONSULTATION_PRICE_CENTS,
-        status: 'PENDING',
-      },
-    });
+    const appointment = await withTenantId(prisma, TEST_TENANT_ID, (tx) =>
+      tx.appointment.create({
+        data: {
+          tenantId: TEST_TENANT_ID,
+          patientId,
+          doctorId,
+          dateTime: buildSlotDateTime(11, 0),
+          durationMinutes: 30,
+          amountCents: CONSULTATION_PRICE_CENTS,
+          status: 'PENDING',
+        },
+      }),
+    );
     createdAppointmentIds.push(appointment.id);
 
     await app.inject({
@@ -327,16 +353,19 @@ describe('Appointments (integración con DB real, Doctors/Payments mockeados)', 
   });
 
   it('registra cancelledBy: PATIENT cuando no hay rol reenviado por el gateway', async () => {
-    const appointment = await prisma.appointment.create({
-      data: {
-        patientId,
-        doctorId,
-        dateTime: buildSlotDateTime(11, 30),
-        durationMinutes: 30,
-        amountCents: CONSULTATION_PRICE_CENTS,
-        status: 'PENDING',
-      },
-    });
+    const appointment = await withTenantId(prisma, TEST_TENANT_ID, (tx) =>
+      tx.appointment.create({
+        data: {
+          tenantId: TEST_TENANT_ID,
+          patientId,
+          doctorId,
+          dateTime: buildSlotDateTime(11, 30),
+          durationMinutes: 30,
+          amountCents: CONSULTATION_PRICE_CENTS,
+          status: 'PENDING',
+        },
+      }),
+    );
     createdAppointmentIds.push(appointment.id);
 
     await app.inject({
@@ -354,17 +383,20 @@ describe('Appointments (integración con DB real, Doctors/Payments mockeados)', 
   it('cancela una cita PAID con <24h de anticipación: refund parcial del 50%', async () => {
     const soonDateTime = new Date(Date.now() + 60 * 60 * 1000);
 
-    const appointment = await prisma.appointment.create({
-      data: {
-        patientId,
-        doctorId,
-        dateTime: soonDateTime,
-        durationMinutes: 30,
-        amountCents: CONSULTATION_PRICE_CENTS,
-        status: 'PAID',
-        stripePaymentIntentId: `pi_${randomUUID()}`,
-      },
-    });
+    const appointment = await withTenantId(prisma, TEST_TENANT_ID, (tx) =>
+      tx.appointment.create({
+        data: {
+          tenantId: TEST_TENANT_ID,
+          patientId,
+          doctorId,
+          dateTime: soonDateTime,
+          durationMinutes: 30,
+          amountCents: CONSULTATION_PRICE_CENTS,
+          status: 'PAID',
+          stripePaymentIntentId: `pi_${randomUUID()}`,
+        },
+      }),
+    );
     createdAppointmentIds.push(appointment.id);
 
     const response = await app.inject({
@@ -378,16 +410,19 @@ describe('Appointments (integración con DB real, Doctors/Payments mockeados)', 
   });
 
   it('no permite cancelar una cita COMPLETED', async () => {
-    const appointment = await prisma.appointment.create({
-      data: {
-        patientId,
-        doctorId,
-        dateTime: buildSlotDateTime(11, 30),
-        durationMinutes: 30,
-        amountCents: CONSULTATION_PRICE_CENTS,
-        status: 'COMPLETED',
-      },
-    });
+    const appointment = await withTenantId(prisma, TEST_TENANT_ID, (tx) =>
+      tx.appointment.create({
+        data: {
+          tenantId: TEST_TENANT_ID,
+          patientId,
+          doctorId,
+          dateTime: buildSlotDateTime(11, 30),
+          durationMinutes: 30,
+          amountCents: CONSULTATION_PRICE_CENTS,
+          status: 'COMPLETED',
+        },
+      }),
+    );
     createdAppointmentIds.push(appointment.id);
 
     const response = await app.inject({
@@ -401,21 +436,25 @@ describe('Appointments (integración con DB real, Doctors/Payments mockeados)', 
   });
 
   it('marca una cita REMINDED como completada', async () => {
-    const appointment = await prisma.appointment.create({
-      data: {
-        patientId,
-        doctorId,
-        dateTime: buildSlotDateTime(9, 30),
-        durationMinutes: 30,
-        amountCents: CONSULTATION_PRICE_CENTS,
-        status: 'REMINDED',
-      },
-    });
+    const appointment = await withTenantId(prisma, TEST_TENANT_ID, (tx) =>
+      tx.appointment.create({
+        data: {
+          tenantId: TEST_TENANT_ID,
+          patientId,
+          doctorId,
+          dateTime: buildSlotDateTime(9, 30),
+          durationMinutes: 30,
+          amountCents: CONSULTATION_PRICE_CENTS,
+          status: 'REMINDED',
+        },
+      }),
+    );
     createdAppointmentIds.push(appointment.id);
 
     const response = await app.inject({
       method: 'PATCH',
       url: `/v1/appointments/${appointment.id}/complete`,
+      headers: TENANT_HEADERS,
     });
 
     expect(response.statusCode).toBe(200);
@@ -423,21 +462,25 @@ describe('Appointments (integración con DB real, Doctors/Payments mockeados)', 
   });
 
   it('marca una cita REMINDED como no-show', async () => {
-    const appointment = await prisma.appointment.create({
-      data: {
-        patientId,
-        doctorId,
-        dateTime: buildSlotDateTime(10, 0),
-        durationMinutes: 30,
-        amountCents: CONSULTATION_PRICE_CENTS,
-        status: 'REMINDED',
-      },
-    });
+    const appointment = await withTenantId(prisma, TEST_TENANT_ID, (tx) =>
+      tx.appointment.create({
+        data: {
+          tenantId: TEST_TENANT_ID,
+          patientId,
+          doctorId,
+          dateTime: buildSlotDateTime(10, 0),
+          durationMinutes: 30,
+          amountCents: CONSULTATION_PRICE_CENTS,
+          status: 'REMINDED',
+        },
+      }),
+    );
     createdAppointmentIds.push(appointment.id);
 
     const response = await app.inject({
       method: 'PATCH',
       url: `/v1/appointments/${appointment.id}/no-show`,
+      headers: TENANT_HEADERS,
     });
 
     expect(response.statusCode).toBe(200);
@@ -484,9 +527,11 @@ describe('Appointments (integración con DB real, Doctors/Payments mockeados)', 
     const winner = responseA.statusCode === 201 ? responseA : responseB;
     createdAppointmentIds.push(winner.json().appointment.id);
 
-    const activeAppointments = await prisma.appointment.findMany({
-      where: { doctorId, dateTime: concurrentDateTime, status: { not: 'CANCELLED' } },
-    });
+    const activeAppointments = await withTenantId(prisma, TEST_TENANT_ID, (tx) =>
+      tx.appointment.findMany({
+        where: { doctorId, dateTime: concurrentDateTime, status: { not: 'CANCELLED' } },
+      }),
+    );
     expect(activeAppointments).toHaveLength(1);
 
     await concurrentApp1.close();

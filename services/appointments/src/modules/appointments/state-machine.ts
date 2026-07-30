@@ -2,6 +2,8 @@ import type { Appointment, AppointmentStatus, EventType, Prisma, PrismaClient } 
 
 import { AppError } from '../../lib/app-error.js';
 import type { Logger } from '../../lib/logger.js';
+import { getTenantId } from '../../lib/tenant-context.js';
+import { withTenant } from '../../lib/tenant-scoped.js';
 import { writeOutboxEvent } from '../../lib/outbox.js';
 
 export const VALID_TRANSITIONS: Record<AppointmentStatus, AppointmentStatus[]> = {
@@ -79,6 +81,7 @@ const runTransition = async (
 
   await tx.appointmentEvent.create({
     data: {
+      tenantId: current.tenantId,
       appointmentId,
       type: metadata.eventType ?? 'STATUS_CHANGED',
       payload: { from: current.status, to, trigger: metadata.trigger, ...metadata.eventPayload },
@@ -109,6 +112,17 @@ const runTransition = async (
 
 export const buildStateMachine = (prisma: PrismaClient, logger: Logger): AppointmentStateMachine => ({
   canTransition,
-  transition: (appointmentId, to, metadata) =>
-    prisma.$transaction((tx) => runTransition(tx, logger, appointmentId, to, metadata)),
+  transition: (appointmentId, to, metadata) => {
+    // writeOutboxEvent() (dentro de runTransition) lee el tenant del
+    // TenantContext ambiental -- debe existir ya (poblado por el
+    // middleware, por runWithTenant en una ruta pública, o por el caller de
+    // un worker/consumer en background) antes de llegar aquí. getTenantId()
+    // solo se usa para fallar rápido con un mensaje claro si no es así.
+    if (getTenantId() === undefined) {
+      throw new Error(
+        'stateMachine.transition() llamado sin TenantContext -- revisar el caller',
+      );
+    }
+    return withTenant(prisma, (tx) => runTransition(tx, logger, appointmentId, to, metadata));
+  },
 });

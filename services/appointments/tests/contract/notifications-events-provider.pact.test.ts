@@ -8,6 +8,10 @@ import { afterAll, describe, it } from 'vitest';
 import { prisma } from '../../src/config/prisma.js';
 import { buildStateMachine } from '../../src/modules/appointments/state-machine.js';
 import { logger } from '../../src/lib/logger.js';
+import { runWithTenant } from '../../src/lib/tenant-context.js';
+import { withTenantId } from '../../src/lib/tenant-scoped.js';
+
+const TEST_TENANT_ID = '88888888-8888-8888-8888-888888888888';
 
 const PACT_FILE = path.join(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -30,7 +34,9 @@ describe('Pact provider verification (mensajes): Appointments → Notifications'
 
   afterAll(async () => {
     if (createdAppointmentIds.length > 0) {
-      await prisma.appointment.deleteMany({ where: { id: { in: createdAppointmentIds } } });
+      await withTenantId(prisma, TEST_TENANT_ID, (tx) =>
+        tx.appointment.deleteMany({ where: { id: { in: createdAppointmentIds } } }),
+      );
     }
     await prisma.$disconnect();
   });
@@ -42,69 +48,82 @@ describe('Pact provider verification (mensajes): Appointments → Notifications'
       pactUrls: [PACT_FILE],
       messageProviders: {
         'un evento AppointmentCreated': async () => {
-          const patient = await prisma.patient.create({
-            data: {
-              email: `pact-provider-${randomUUID()}@example.com`,
-              name: 'Paciente Pact Provider',
-              phone: '+54 9 11 5555-9999',
-            },
-          });
-          const appointment = await prisma.appointment.create({
-            data: {
-              patientId: patient.id,
-              doctorId: randomUUID(),
-              dateTime: new Date(Date.now() + 86_400_000),
-              durationMinutes: 30,
-            },
-          });
-          createdAppointmentIds.push(appointment.id);
-          await prisma.appointmentEvent.create({
-            data: { appointmentId: appointment.id, type: 'CREATED', payload: {} },
-          });
-          await prisma.outboxEvent.create({
-            data: {
-              type: 'AppointmentCreated',
-              payload: {
-                appointmentId: appointment.id,
-                patientId: patient.id,
-                doctorId: appointment.doctorId,
-                dateTime: appointment.dateTime.toISOString(),
+          const event = await withTenantId(prisma, TEST_TENANT_ID, async (tx) => {
+            const patient = await tx.patient.create({
+              data: {
+                tenantId: TEST_TENANT_ID,
+                email: `pact-provider-${randomUUID()}@example.com`,
+                name: 'Paciente Pact Provider',
+                phone: '+54 9 11 5555-9999',
               },
-            },
-          });
-          const event = await prisma.outboxEvent.findFirst({
-            where: { type: 'AppointmentCreated' },
-            orderBy: { createdAt: 'desc' },
+            });
+            const appointment = await tx.appointment.create({
+              data: {
+                tenantId: TEST_TENANT_ID,
+                patientId: patient.id,
+                doctorId: randomUUID(),
+                dateTime: new Date(Date.now() + 86_400_000),
+                durationMinutes: 30,
+              },
+            });
+            createdAppointmentIds.push(appointment.id);
+            await tx.appointmentEvent.create({
+              data: { tenantId: TEST_TENANT_ID, appointmentId: appointment.id, type: 'CREATED', payload: {} },
+            });
+            await tx.outboxEvent.create({
+              data: {
+                tenantId: TEST_TENANT_ID,
+                type: 'AppointmentCreated',
+                payload: {
+                  appointmentId: appointment.id,
+                  patientId: patient.id,
+                  doctorId: appointment.doctorId,
+                  dateTime: appointment.dateTime.toISOString(),
+                },
+              },
+            });
+            return tx.outboxEvent.findFirst({
+              where: { type: 'AppointmentCreated' },
+              orderBy: { createdAt: 'desc' },
+            });
           });
           return event?.payload;
         },
         'un evento AppointmentStatusChanged': async () => {
-          const patient = await prisma.patient.create({
-            data: {
-              email: `pact-provider-${randomUUID()}@example.com`,
-              name: 'Paciente Pact Provider 2',
-              phone: '+54 9 11 5555-8888',
-            },
-          });
-          const appointment = await prisma.appointment.create({
-            data: {
-              patientId: patient.id,
-              doctorId: randomUUID(),
-              dateTime: new Date(Date.now() + 86_400_000),
-              durationMinutes: 30,
-              status: 'CONFIRMED',
-              stripePaymentIntentId: `pi_${randomUUID()}`,
-            },
+          const appointment = await withTenantId(prisma, TEST_TENANT_ID, async (tx) => {
+            const patient = await tx.patient.create({
+              data: {
+                tenantId: TEST_TENANT_ID,
+                email: `pact-provider-${randomUUID()}@example.com`,
+                name: 'Paciente Pact Provider 2',
+                phone: '+54 9 11 5555-8888',
+              },
+            });
+            return tx.appointment.create({
+              data: {
+                tenantId: TEST_TENANT_ID,
+                patientId: patient.id,
+                doctorId: randomUUID(),
+                dateTime: new Date(Date.now() + 86_400_000),
+                durationMinutes: 30,
+                status: 'CONFIRMED',
+                stripePaymentIntentId: `pi_${randomUUID()}`,
+              },
+            });
           });
           createdAppointmentIds.push(appointment.id);
 
           const stateMachine = buildStateMachine(prisma, logger);
-          await stateMachine.transition(appointment.id, 'PAID', { trigger: 'webhook' });
+          await runWithTenant(TEST_TENANT_ID, () =>
+            stateMachine.transition(appointment.id, 'PAID', { trigger: 'webhook' }),
+          );
 
-          const event = await prisma.outboxEvent.findFirst({
-            where: { type: 'AppointmentStatusChanged' },
-            orderBy: { createdAt: 'desc' },
-          });
+          const event = await withTenantId(prisma, TEST_TENANT_ID, (tx) =>
+            tx.outboxEvent.findFirst({
+              where: { type: 'AppointmentStatusChanged' },
+              orderBy: { createdAt: 'desc' },
+            }),
+          );
           return event?.payload;
         },
       },

@@ -1,6 +1,8 @@
 import type { Appointment, Patient, PrismaClient } from '@prisma/client';
 
 import { writeOutboxEvent } from '../../lib/outbox.js';
+import { getTenantId } from '../../lib/tenant-context.js';
+import { withTenant } from '../../lib/tenant-scoped.js';
 
 export interface CreatePatientData {
   email: string;
@@ -29,12 +31,23 @@ export interface PatientRepository {
   list: (params: ListPatientsParams) => Promise<Patient[]>;
 }
 
+// Patient es dato privado por tenant (a diferencia del directorio de
+// Doctors) -- TODO método pasa por withTenant. Para los flujos públicos
+// (crear paciente, buscar por email al reservar), el caller ya resolvió el
+// tenant desde el doctorId y entró en runWithTenant(...) antes de llegar
+// aquí (ver patients.service.ts) -- este repositorio no sabe ni le importa
+// de dónde vino el tenant, solo que debe existir en el AsyncLocalStorage.
 export class PrismaPatientRepository implements PatientRepository {
   constructor(private readonly prisma: PrismaClient) {}
 
   async create(data: CreatePatientData): Promise<Patient> {
-    return this.prisma.$transaction(async (tx) => {
-      const patient = await tx.patient.create({ data });
+    return withTenant(this.prisma, async (tx) => {
+      const tenantId = getTenantId();
+      if (!tenantId) {
+        throw new Error('create() llamado sin tenant en contexto');
+      }
+
+      const patient = await tx.patient.create({ data: { ...data, tenantId } });
 
       // Se reusa el tipo PatientUpdated también para la creación: para un
       // consumer de read-model (Notifications, RFC-001 decisión 4) crear y
@@ -52,18 +65,20 @@ export class PrismaPatientRepository implements PatientRepository {
   }
 
   async findByEmail(email: string): Promise<Patient | null> {
-    return this.prisma.patient.findUnique({ where: { email } });
+    return withTenant(this.prisma, (tx) => tx.patient.findFirst({ where: { email } }));
   }
 
   async findById(id: string): Promise<PatientWithAppointments | null> {
-    return this.prisma.patient.findUnique({
-      where: { id },
-      include: { appointments: { orderBy: { dateTime: 'desc' } } },
-    });
+    return withTenant(this.prisma, (tx) =>
+      tx.patient.findUnique({
+        where: { id },
+        include: { appointments: { orderBy: { dateTime: 'desc' } } },
+      }),
+    );
   }
 
   async update(id: string, data: UpdatePatientData): Promise<Patient | null> {
-    return this.prisma.$transaction(async (tx) => {
+    return withTenant(this.prisma, async (tx) => {
       const existing = await tx.patient.findUnique({ where: { id } });
       if (!existing) {
         return null;
@@ -84,11 +99,13 @@ export class PrismaPatientRepository implements PatientRepository {
   }
 
   async list(params: ListPatientsParams): Promise<Patient[]> {
-    return this.prisma.patient.findMany({
-      take: params.limit,
-      ...(params.cursor ? { skip: 1, cursor: { id: params.cursor } } : {}),
-      orderBy: { createdAt: 'asc' },
-    });
+    return withTenant(this.prisma, (tx) =>
+      tx.patient.findMany({
+        take: params.limit,
+        ...(params.cursor ? { skip: 1, cursor: { id: params.cursor } } : {}),
+        orderBy: { createdAt: 'asc' },
+      }),
+    );
   }
 }
 

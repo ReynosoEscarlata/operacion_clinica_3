@@ -5,6 +5,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { buildApp } from '../../src/app.js';
 import { prisma } from '../../src/config/prisma.js';
+import { withTenantId } from '../../src/lib/tenant-scoped.js';
 import type { DoctorsClient } from '../../src/clients/doctors-client.js';
 import type { PaymentsClient } from '../../src/clients/payments-client.js';
 
@@ -20,6 +21,12 @@ const buildFakePaymentsClient = (): PaymentsClient => ({
   createRefund: vi.fn(),
 });
 
+// Tenant fijo de este archivo (RLS activo, Fase 3a). Todas las queries
+// directas a `prisma` en este archivo pasan por withTenantId (RLS aplica
+// también a los fixtures de test, no solo al código de producción).
+const TEST_TENANT_ID = '77777777-7777-7777-7777-777777777777';
+const TENANT_HEADERS = { 'x-internal-tenant-id': TEST_TENANT_ID };
+
 describe('Admin (dashboard/eventos/dead-letter, integración con Postgres real)', () => {
   let app: FastifyInstance;
   const doctorId = randomUUID();
@@ -28,14 +35,17 @@ describe('Admin (dashboard/eventos/dead-letter, integración con Postgres real)'
   const createdDeadLetterIds: string[] = [];
 
   beforeAll(async () => {
-    const patient = await prisma.patient.create({
-      data: {
-        email: `admin-test-${randomUUID()}@example.com`,
-        name: 'Paciente Admin Test',
-        phone: '+54 9 11 5555-3333',
-        stripeCustomerId: 'cus_admin_test',
-      },
-    });
+    const patient = await withTenantId(prisma, TEST_TENANT_ID, (tx) =>
+      tx.patient.create({
+        data: {
+          tenantId: TEST_TENANT_ID,
+          email: `admin-test-${randomUUID()}@example.com`,
+          name: 'Paciente Admin Test',
+          phone: '+54 9 11 5555-3333',
+          stripeCustomerId: 'cus_admin_test',
+        },
+      }),
+    );
     patientId = patient.id;
 
     app = await buildApp({
@@ -50,11 +60,13 @@ describe('Admin (dashboard/eventos/dead-letter, integración con Postgres real)'
   });
 
   afterAll(async () => {
-    await prisma.deadLetterEntry.deleteMany({ where: { id: { in: createdDeadLetterIds } } });
-    if (createdAppointmentIds.length > 0) {
-      await prisma.appointment.deleteMany({ where: { id: { in: createdAppointmentIds } } });
-    }
-    await prisma.patient.delete({ where: { id: patientId } }).catch(() => undefined);
+    await withTenantId(prisma, TEST_TENANT_ID, async (tx) => {
+      await tx.deadLetterEntry.deleteMany({ where: { id: { in: createdDeadLetterIds } } });
+      if (createdAppointmentIds.length > 0) {
+        await tx.appointment.deleteMany({ where: { id: { in: createdAppointmentIds } } });
+      }
+      await tx.patient.delete({ where: { id: patientId } }).catch(() => undefined);
+    });
     await app.close();
     await prisma.$disconnect();
   });
@@ -63,30 +75,39 @@ describe('Admin (dashboard/eventos/dead-letter, integración con Postgres real)'
     it('cuenta citas de hoy y agrega no-show rate por doctor', async () => {
       const today = new Date();
 
-      const completed = await prisma.appointment.create({
-        data: {
-          patientId,
-          doctorId,
-          dateTime: today,
-          durationMinutes: 30,
-          amountCents: 50_000,
-          status: 'COMPLETED',
-          paidAt: today,
-        },
-      });
-      const noShow = await prisma.appointment.create({
-        data: {
-          patientId,
-          doctorId,
-          dateTime: today,
-          durationMinutes: 30,
-          amountCents: 50_000,
-          status: 'NO_SHOW',
-        },
+      const { completed, noShow } = await withTenantId(prisma, TEST_TENANT_ID, async (tx) => {
+        const completed = await tx.appointment.create({
+          data: {
+            tenantId: TEST_TENANT_ID,
+            patientId,
+            doctorId,
+            dateTime: today,
+            durationMinutes: 30,
+            amountCents: 50_000,
+            status: 'COMPLETED',
+            paidAt: today,
+          },
+        });
+        const noShow = await tx.appointment.create({
+          data: {
+            tenantId: TEST_TENANT_ID,
+            patientId,
+            doctorId,
+            dateTime: today,
+            durationMinutes: 30,
+            amountCents: 50_000,
+            status: 'NO_SHOW',
+          },
+        });
+        return { completed, noShow };
       });
       createdAppointmentIds.push(completed.id, noShow.id);
 
-      const response = await app.inject({ method: 'GET', url: '/v1/admin/dashboard' });
+      const response = await app.inject({
+        method: 'GET',
+        url: '/v1/admin/dashboard',
+        headers: TENANT_HEADERS,
+      });
 
       expect(response.statusCode).toBe(200);
       const body = response.json();
@@ -105,22 +126,35 @@ describe('Admin (dashboard/eventos/dead-letter, integración con Postgres real)'
 
   describe('GET /v1/admin/events', () => {
     it('lista eventos recientes de citas dentro de la ventana de horas pedida', async () => {
-      const appointment = await prisma.appointment.create({
-        data: {
-          patientId,
-          doctorId,
-          dateTime: new Date(),
-          durationMinutes: 30,
-          amountCents: 50_000,
-          status: 'PENDING',
-        },
+      const appointment = await withTenantId(prisma, TEST_TENANT_ID, async (tx) => {
+        const appointment = await tx.appointment.create({
+          data: {
+            tenantId: TEST_TENANT_ID,
+            patientId,
+            doctorId,
+            dateTime: new Date(),
+            durationMinutes: 30,
+            amountCents: 50_000,
+            status: 'PENDING',
+          },
+        });
+        await tx.appointmentEvent.create({
+          data: {
+            tenantId: TEST_TENANT_ID,
+            appointmentId: appointment.id,
+            type: 'CREATED',
+            payload: { patientId, doctorId },
+          },
+        });
+        return appointment;
       });
       createdAppointmentIds.push(appointment.id);
-      await prisma.appointmentEvent.create({
-        data: { appointmentId: appointment.id, type: 'CREATED', payload: { patientId, doctorId } },
-      });
 
-      const response = await app.inject({ method: 'GET', url: '/v1/admin/events?hours=1' });
+      const response = await app.inject({
+        method: 'GET',
+        url: '/v1/admin/events?hours=1',
+        headers: TENANT_HEADERS,
+      });
 
       expect(response.statusCode).toBe(200);
       const events = response.json() as Array<{ appointmentId: string; type: string }>;
@@ -130,63 +164,108 @@ describe('Admin (dashboard/eventos/dead-letter, integración con Postgres real)'
     });
 
     it('rechaza un hours fuera de rango con 400', async () => {
-      const response = await app.inject({ method: 'GET', url: '/v1/admin/events?hours=0' });
+      const response = await app.inject({
+        method: 'GET',
+        url: '/v1/admin/events?hours=0',
+        headers: TENANT_HEADERS,
+      });
       expect(response.statusCode).toBe(400);
     });
   });
 
   describe('dead-letter', () => {
     it('lista, reintenta (republica un OutboxEvent nuevo) y borra una entrada', async () => {
-      const entry = await prisma.deadLetterEntry.create({
-        data: {
-          eventId: randomUUID(),
-          eventType: 'PaymentSucceeded',
-          payload: { appointmentId: randomUUID() },
-          error: 'boom',
-          attempts: 5,
-        },
-      });
+      const entry = await withTenantId(prisma, TEST_TENANT_ID, (tx) =>
+        tx.deadLetterEntry.create({
+          data: {
+            tenantId: TEST_TENANT_ID,
+            eventId: randomUUID(),
+            eventType: 'PaymentSucceeded',
+            payload: { appointmentId: randomUUID() },
+            error: 'boom',
+            attempts: 5,
+          },
+        }),
+      );
       createdDeadLetterIds.push(entry.id);
 
-      const listResponse = await app.inject({ method: 'GET', url: '/v1/admin/dead-letter' });
+      const listResponse = await app.inject({
+        method: 'GET',
+        url: '/v1/admin/dead-letter',
+        headers: TENANT_HEADERS,
+      });
       expect(listResponse.statusCode).toBe(200);
       const listBody = listResponse.json();
       expect(listBody.status).toBe('ok');
       expect(listBody.data.some((row: { id: string }) => row.id === entry.id)).toBe(true);
 
-      const retryResponse = await app.inject({ method: 'POST', url: `/v1/admin/dead-letter/${entry.id}/retry` });
+      const retryResponse = await app.inject({
+        method: 'POST',
+        url: `/v1/admin/dead-letter/${entry.id}/retry`,
+        headers: TENANT_HEADERS,
+      });
       expect(retryResponse.statusCode).toBe(200);
 
-      const stillThere = await prisma.deadLetterEntry.findUnique({ where: { id: entry.id } });
+      const stillThere = await withTenantId(prisma, TEST_TENANT_ID, (tx) =>
+        tx.deadLetterEntry.findUnique({ where: { id: entry.id } }),
+      );
       expect(stillThere).toBeNull();
 
-      const republished = await prisma.outboxEvent.findFirst({
-        where: { type: 'PaymentSucceeded', payload: { path: ['appointmentId'], equals: (entry.payload as { appointmentId: string }).appointmentId } },
-      });
+      const republished = await withTenantId(prisma, TEST_TENANT_ID, (tx) =>
+        tx.outboxEvent.findFirst({
+          where: {
+            type: 'PaymentSucceeded',
+            payload: { path: ['appointmentId'], equals: (entry.payload as { appointmentId: string }).appointmentId },
+          },
+        }),
+      );
       expect(republished).toBeDefined();
       expect(republished?.publishedAt).toBeNull();
     });
 
     it('devuelve 404 al reintentar una entrada que no existe', async () => {
-      const response = await app.inject({ method: 'POST', url: `/v1/admin/dead-letter/${randomUUID()}/retry` });
+      const response = await app.inject({
+        method: 'POST',
+        url: `/v1/admin/dead-letter/${randomUUID()}/retry`,
+        headers: TENANT_HEADERS,
+      });
       expect(response.statusCode).toBe(404);
       expect(response.json().error.code).toBe('DEAD_LETTER_NOT_FOUND');
     });
 
     it('borra una entrada de dead-letter sin reintentarla', async () => {
-      const entry = await prisma.deadLetterEntry.create({
-        data: { eventId: randomUUID(), eventType: 'PaymentFailed', payload: {}, error: 'boom', attempts: 5 },
-      });
+      const entry = await withTenantId(prisma, TEST_TENANT_ID, (tx) =>
+        tx.deadLetterEntry.create({
+          data: {
+            tenantId: TEST_TENANT_ID,
+            eventId: randomUUID(),
+            eventType: 'PaymentFailed',
+            payload: {},
+            error: 'boom',
+            attempts: 5,
+          },
+        }),
+      );
 
-      const response = await app.inject({ method: 'DELETE', url: `/v1/admin/dead-letter/${entry.id}` });
+      const response = await app.inject({
+        method: 'DELETE',
+        url: `/v1/admin/dead-letter/${entry.id}`,
+        headers: TENANT_HEADERS,
+      });
       expect(response.statusCode).toBe(200);
 
-      const stillThere = await prisma.deadLetterEntry.findUnique({ where: { id: entry.id } });
+      const stillThere = await withTenantId(prisma, TEST_TENANT_ID, (tx) =>
+        tx.deadLetterEntry.findUnique({ where: { id: entry.id } }),
+      );
       expect(stillThere).toBeNull();
     });
 
     it('devuelve 404 al borrar una entrada que no existe', async () => {
-      const response = await app.inject({ method: 'DELETE', url: `/v1/admin/dead-letter/${randomUUID()}` });
+      const response = await app.inject({
+        method: 'DELETE',
+        url: `/v1/admin/dead-letter/${randomUUID()}`,
+        headers: TENANT_HEADERS,
+      });
       expect(response.statusCode).toBe(404);
     });
   });

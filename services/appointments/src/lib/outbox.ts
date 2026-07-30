@@ -1,13 +1,20 @@
 import type { Prisma } from '@prisma/client';
 
+import { getTenantId } from './tenant-context.js';
+
 // Ver ADR-002-transacciones-distribuidas.md: el evento se escribe en la
-// misma transacción que el cambio de negocio. El relay que lo publica a
-// Redis Streams se implementa en la Fase 3 del plan — por ahora solo queda
-// persistido con publishedAt = null.
+// misma transacción que el cambio de negocio. El relay (Redis Streams hoy,
+// SQS/SNS en Fase 3b) se implementa aparte. tenantId del TenantContext
+// ambiental -- las mutaciones públicas ya corren dentro de
+// runWithTenant(doctor.tenantId, ...) antes de llegar aquí.
 export const writeOutboxEvent = async (
   tx: Prisma.TransactionClient,
   type: string,
   payload: Record<string, unknown>,
 ): Promise<void> => {
-  await tx.outboxEvent.create({ data: { type, payload: payload as Prisma.InputJsonValue } });
+  const tenantId = getTenantId();
+  if (!tenantId) {
+    throw new Error('writeOutboxEvent() llamado sin tenant en contexto');
+  }
+  await tx.outboxEvent.create({ data: { tenantId, type, payload: payload as Prisma.InputJsonValue } });
 };

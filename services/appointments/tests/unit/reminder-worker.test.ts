@@ -5,11 +5,14 @@ import { processReminderJob } from '../../src/queues/workers/reminder.worker.js'
 import type { AppointmentRepository } from '../../src/modules/appointments/appointments.repository.js';
 import type { AppointmentStateMachine } from '../../src/modules/appointments/state-machine.js';
 
+const TENANT_ID = '11111111-1111-1111-1111-111111111111';
+
 const buildLogger = () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), child: vi.fn() });
 
 const buildAppointment = (overrides: Partial<Appointment> = {}): Appointment =>
   ({
     id: 'apt-1',
+    tenantId: TENANT_ID,
     patientId: 'patient-1',
     doctorId: 'doctor-1',
     dateTime: new Date(),
@@ -29,6 +32,8 @@ const buildAppointment = (overrides: Partial<Appointment> = {}): Appointment =>
     ...overrides,
   }) as Appointment;
 
+const resolveTenant = vi.fn().mockResolvedValue(TENANT_ID);
+
 describe('processReminderJob', () => {
   it('transiciona PAID -> REMINDED sin enviar ningún email (responsabilidad de Notifications)', async () => {
     const transition = vi.fn().mockResolvedValue(buildAppointment({ status: 'REMINDED' }));
@@ -37,7 +42,10 @@ describe('processReminderJob', () => {
     } as unknown as AppointmentRepository;
     const stateMachine = { transition } as unknown as AppointmentStateMachine;
 
-    await processReminderJob({ appointmentId: 'apt-1' }, { appointmentRepository: repository, stateMachine, logger: buildLogger() as never });
+    await processReminderJob(
+      { appointmentId: 'apt-1' },
+      { appointmentRepository: repository, resolveTenant, stateMachine, logger: buildLogger() as never },
+    );
 
     expect(transition).toHaveBeenCalledWith('apt-1', 'REMINDED', {
       trigger: 'reminder-job',
@@ -52,7 +60,10 @@ describe('processReminderJob', () => {
     } as unknown as AppointmentRepository;
     const stateMachine = { transition } as unknown as AppointmentStateMachine;
 
-    await processReminderJob({ appointmentId: 'apt-1' }, { appointmentRepository: repository, stateMachine, logger: buildLogger() as never });
+    await processReminderJob(
+      { appointmentId: 'apt-1' },
+      { appointmentRepository: repository, resolveTenant, stateMachine, logger: buildLogger() as never },
+    );
 
     expect(transition).not.toHaveBeenCalled();
   });
@@ -66,7 +77,12 @@ describe('processReminderJob', () => {
     await expect(
       processReminderJob(
         { appointmentId: 'no-existe' },
-        { appointmentRepository: repository, stateMachine, logger: buildLogger() as never },
+        {
+          appointmentRepository: repository,
+          resolveTenant: vi.fn().mockResolvedValue(null),
+          stateMachine,
+          logger: buildLogger() as never,
+        },
       ),
     ).rejects.toThrow('Cita no encontrada');
   });

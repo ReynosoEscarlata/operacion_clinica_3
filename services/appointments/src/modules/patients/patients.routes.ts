@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 
+import { buildHttpDoctorsClient, type DoctorsClient } from '../../clients/doctors-client.js';
 import { buildHttpPaymentsClient, type PaymentsClient } from '../../clients/payments-client.js';
 import { env } from '../../config/env.js';
 import { prisma as defaultPrisma } from '../../config/prisma.js';
@@ -18,12 +19,14 @@ import { buildPatientService } from './patients.service.js';
 export interface PatientRoutesDeps {
   repository?: PatientRepository;
   paymentsClient?: PaymentsClient;
+  doctorsClient?: DoctorsClient;
 }
 
 export const registerPatientRoutes = (app: FastifyInstance, deps: PatientRoutesDeps = {}): void => {
   const repository = deps.repository ?? buildPatientRepository(defaultPrisma);
   const paymentsClient = deps.paymentsClient ?? buildHttpPaymentsClient(env.PAYMENTS_SERVICE_URL);
-  const service = buildPatientService({ repository, paymentsClient, logger: defaultLogger });
+  const doctorsClient = deps.doctorsClient ?? buildHttpDoctorsClient(env.DOCTORS_SERVICE_URL);
+  const service = buildPatientService({ repository, paymentsClient, doctorsClient, logger: defaultLogger });
   const controller = buildPatientController(service);
 
   app.post('/v1/patients', { schema: { body: CreatePatientBody } }, controller.create);

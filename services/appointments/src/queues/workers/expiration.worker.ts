@@ -5,6 +5,7 @@ import { Worker } from 'bullmq';
 import { getRedisConnectionOptions } from '../../config/redis.js';
 import type { Logger } from '../../lib/logger.js';
 import { requestContextStorage } from '../../lib/request-context.js';
+import { runWithTenant } from '../../lib/tenant-context.js';
 import type { AppointmentStateMachine } from '../../modules/appointments/state-machine.js';
 import type { ExpirationJobData } from '../jobs/expiration.job.js';
 import { APPOINTMENT_EXPIRATION_QUEUE } from '../queues.js';
@@ -22,6 +23,10 @@ export interface ExpirationJobDeps {
 
 export interface ExpirationWorkerDeps {
   findStatusById: (appointmentId: string) => Promise<AppointmentStatus | null>;
+  // Resuelve el tenant de la cita ANTES de tocar cualquier repositorio --
+  // este worker corre en background, sin ningún TenantContext de request
+  // (ver resolveTenantForAppointment en lib/tenant-scoped.ts).
+  resolveTenant: (appointmentId: string) => Promise<string | null>;
   stateMachine: AppointmentStateMachine;
   logger: Logger;
 }
@@ -61,9 +66,17 @@ export const buildExpirationWorker = (deps: ExpirationWorkerDeps): Worker<Expira
         ...(job.data.requestId ? { requestId: job.data.requestId } : {}),
       });
 
-      await requestContextStorage.run({ requestId: job.data.requestId ?? String(job.id) }, () =>
-        processExpirationJob(job.data, { ...deps, logger: jobLogger }),
-      );
+      await requestContextStorage.run({ requestId: job.data.requestId ?? String(job.id) }, async () => {
+        const tenantId = await deps.resolveTenant(job.data.appointmentId);
+        if (!tenantId) {
+          jobLogger.warn({ appointmentId: job.data.appointmentId }, 'Job de expiración: cita no encontrada');
+          return;
+        }
+
+        await runWithTenant(tenantId, () =>
+          processExpirationJob(job.data, { ...deps, logger: jobLogger }),
+        );
+      });
     },
     { connection: getRedisConnectionOptions() },
   );

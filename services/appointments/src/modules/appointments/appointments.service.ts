@@ -4,6 +4,9 @@ import type { DoctorsClient } from '../../clients/doctors-client.js';
 import type { PaymentsClient } from '../../clients/payments-client.js';
 import { AppError } from '../../lib/app-error.js';
 import type { Logger } from '../../lib/logger.js';
+import { prisma as defaultPrisma } from '../../config/prisma.js';
+import { getTenantId, runWithTenant } from '../../lib/tenant-context.js';
+import { resolveTenantForAppointment } from '../../lib/tenant-scoped.js';
 import type { PatientRepository } from '../patients/patients.repository.js';
 import type {
   AppointmentRepository,
@@ -52,59 +55,90 @@ export class AppointmentService {
     private readonly logger: Logger,
   ) {}
 
+  // Ruta pública (paciente sin cuenta) -- el tenant se resuelve del doctorId
+  // (confirmado con Ricardo, Fase 3a) y se entra explícitamente en ese
+  // contexto antes de tocar cualquier repositorio. Si dto.patientId
+  // perteneciera a OTRO tenant que el del doctor, patientRepository.findById
+  // (que corre ya dentro de este contexto) simplemente no lo encuentra --
+  // RLS lo filtra, y esto cae en PATIENT_NOT_FOUND de forma natural, sin
+  // necesidad de una verificación explícita de consistencia cross-tenant.
   async create(dto: CreateAppointmentDto, requestId?: string): Promise<CreateAppointmentResult> {
-    const patient = await this.patientRepository.findById(dto.patientId);
-    if (!patient) {
-      throw new AppError(404, 'PATIENT_NOT_FOUND', 'Paciente no encontrado');
-    }
-
     const doctor = await this.doctorsClient.getDoctor(dto.doctorId);
     if (!doctor) {
       throw new AppError(404, 'DOCTOR_NOT_FOUND', 'Doctor no encontrado');
     }
 
-    const dateTime = new Date(dto.dateTime);
-    await this.assertSlotIsBookable(dto.doctorId, dateTime);
+    return runWithTenant(doctor.tenantId, async () => {
+      const patient = await this.patientRepository.findById(dto.patientId);
+      if (!patient) {
+        throw new AppError(404, 'PATIENT_NOT_FOUND', 'Paciente no encontrado');
+      }
 
-    const appointment = await this.repository.createPending({
-      patientId: dto.patientId,
-      doctorId: dto.doctorId,
-      dateTime,
-      durationMinutes: SLOT_MINUTES,
+      const dateTime = new Date(dto.dateTime);
+      await this.assertSlotIsBookable(dto.doctorId, dateTime);
+
+      const appointment = await this.repository.createPending({
+        patientId: dto.patientId,
+        doctorId: dto.doctorId,
+        dateTime,
+        durationMinutes: SLOT_MINUTES,
+      });
+
+      let paymentIntent: { id: string; clientSecret: string | null };
+      try {
+        paymentIntent = await this.paymentsClient.createPaymentIntent(
+          appointment.id,
+          doctor.consultationPriceCents,
+          patient.stripeCustomerId,
+        );
+      } catch (error) {
+        await this.compensateFailedCreation(appointment.id, error);
+        throw error;
+      }
+
+      const confirmed = await this.stateMachine.transition(appointment.id, 'CONFIRMED', {
+        trigger: 'system',
+        eventPayload: { stripePaymentIntentId: paymentIntent.id },
+        extraData: {
+          stripePaymentIntentId: paymentIntent.id,
+          amountCents: doctor.consultationPriceCents,
+        },
+      });
+
+      await this.enqueueExpiration(appointment.id, requestId);
+
+      return { appointment: confirmed, clientSecret: paymentIntent.clientSecret };
     });
-
-    let paymentIntent: { id: string; clientSecret: string | null };
-    try {
-      paymentIntent = await this.paymentsClient.createPaymentIntent(
-        appointment.id,
-        doctor.consultationPriceCents,
-        patient.stripeCustomerId,
-      );
-    } catch (error) {
-      await this.compensateFailedCreation(appointment.id, error);
-      throw error;
-    }
-
-    const confirmed = await this.stateMachine.transition(appointment.id, 'CONFIRMED', {
-      trigger: 'system',
-      eventPayload: { stripePaymentIntentId: paymentIntent.id },
-      extraData: {
-        stripePaymentIntentId: paymentIntent.id,
-        amountCents: doctor.consultationPriceCents,
-      },
-    });
-
-    await this.enqueueExpiration(appointment.id, requestId);
-
-    return { appointment: confirmed, clientSecret: paymentIntent.clientSecret };
   }
 
+  // Alcanzable tanto públicamente (paciente, posesión de UUID, RFC-001)
+  // como por un admin autenticado -- el gateway reenvía el tenant del admin
+  // igual en esta ruta "pública" si hay JWT válido. Distinción crítica: si
+  // YA hay tenant ambiental (admin), se usa ESE estrictamente -- nunca se
+  // cae al capability-token de otro tenant. Solo sin ningún tenant
+  // ambiental (paciente sin cuenta) se resuelve desde la propia fila
+  // (riesgo residual ya aceptado en el threat model, amenaza #3).
   async getById(id: string): Promise<AppointmentWithEvents> {
-    const appointment = await this.repository.findById(id);
-    if (!appointment) {
+    if (getTenantId()) {
+      const appointment = await this.repository.findById(id);
+      if (!appointment) {
+        throw new AppError(404, 'APPOINTMENT_NOT_FOUND', 'Cita no encontrada');
+      }
+      return appointment;
+    }
+
+    const tenantId = await resolveTenantForAppointment(defaultPrisma, id);
+    if (!tenantId) {
       throw new AppError(404, 'APPOINTMENT_NOT_FOUND', 'Cita no encontrada');
     }
-    return appointment;
+
+    return runWithTenant(tenantId, async () => {
+      const appointment = await this.repository.findById(id);
+      if (!appointment) {
+        throw new AppError(404, 'APPOINTMENT_NOT_FOUND', 'Cita no encontrada');
+      }
+      return appointment;
+    });
   }
 
   async list(query: ListAppointmentsQueryDto): Promise<ListAppointmentsResult> {
@@ -125,7 +159,27 @@ export class AppointmentService {
     });
   }
 
+  // Mismo criterio ambient-first que getById: un admin autenticado cancela
+  // estrictamente dentro de su propio tenant; solo sin tenant ambiental
+  // (paciente sin cuenta) se resuelve desde la propia fila.
   async cancel(
+    id: string,
+    reason: string | undefined,
+    cancelledBy: CancelledBy,
+  ): Promise<CancelAppointmentResult> {
+    if (getTenantId()) {
+      return this.cancelWithinTenant(id, reason, cancelledBy);
+    }
+
+    const tenantId = await resolveTenantForAppointment(defaultPrisma, id);
+    if (!tenantId) {
+      throw new AppError(404, 'APPOINTMENT_NOT_FOUND', 'Cita no encontrada');
+    }
+
+    return runWithTenant(tenantId, () => this.cancelWithinTenant(id, reason, cancelledBy));
+  }
+
+  private async cancelWithinTenant(
     id: string,
     reason: string | undefined,
     cancelledBy: CancelledBy,

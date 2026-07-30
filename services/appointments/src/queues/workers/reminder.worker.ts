@@ -4,6 +4,7 @@ import { Worker } from 'bullmq';
 import { getRedisConnectionOptions } from '../../config/redis.js';
 import type { Logger } from '../../lib/logger.js';
 import { requestContextStorage } from '../../lib/request-context.js';
+import { runWithTenant } from '../../lib/tenant-context.js';
 import type { AppointmentRepository } from '../../modules/appointments/appointments.repository.js';
 import type { AppointmentStateMachine } from '../../modules/appointments/state-machine.js';
 import type { ReminderJobData } from '../jobs/reminder.job.js';
@@ -11,6 +12,9 @@ import { APPOINTMENT_REMINDERS_QUEUE } from '../queues.js';
 
 export interface ReminderWorkerDeps {
   appointmentRepository: AppointmentRepository;
+  // Resuelve el tenant de la cita ANTES de tocar cualquier repositorio --
+  // este worker corre en background, sin ningún TenantContext de request.
+  resolveTenant: (appointmentId: string) => Promise<string | null>;
   stateMachine: AppointmentStateMachine;
   logger: Logger;
 }
@@ -24,24 +28,31 @@ export const processReminderJob = async (
   data: ReminderJobData,
   deps: ReminderWorkerDeps,
 ): Promise<void> => {
-  const appointment = await deps.appointmentRepository.findById(data.appointmentId);
-
-  if (!appointment) {
+  const tenantId = await deps.resolveTenant(data.appointmentId);
+  if (!tenantId) {
     throw new Error(`Cita no encontrada: ${data.appointmentId}`);
   }
 
-  // Idempotencia: si ya fue recordada o transicionó de PAID, no hacer nada.
-  if (appointment.status !== 'PAID') {
-    deps.logger.info(
-      { appointmentId: data.appointmentId, currentStatus: appointment.status },
-      'Job de recordatorio ignorado: cita no está en estado PAID',
-    );
-    return;
-  }
+  await runWithTenant(tenantId, async () => {
+    const appointment = await deps.appointmentRepository.findById(data.appointmentId);
 
-  await deps.stateMachine.transition(appointment.id, 'REMINDED', {
-    trigger: 'reminder-job',
-    eventType: 'REMINDER_SENT',
+    if (!appointment) {
+      throw new Error(`Cita no encontrada: ${data.appointmentId}`);
+    }
+
+    // Idempotencia: si ya fue recordada o transicionó de PAID, no hacer nada.
+    if (appointment.status !== 'PAID') {
+      deps.logger.info(
+        { appointmentId: data.appointmentId, currentStatus: appointment.status },
+        'Job de recordatorio ignorado: cita no está en estado PAID',
+      );
+      return;
+    }
+
+    await deps.stateMachine.transition(appointment.id, 'REMINDED', {
+      trigger: 'reminder-job',
+      eventType: 'REMINDER_SENT',
+    });
   });
 };
 

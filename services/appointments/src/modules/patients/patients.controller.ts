@@ -32,7 +32,7 @@ export class PatientController {
     request: FastifyRequest<{ Querystring: FindPatientByEmailQueryDto }>,
     reply: FastifyReply,
   ): Promise<void> => {
-    const patient = await this.service.getByEmail(request.query.email);
+    const patient = await this.service.getByEmail(request.query.email, request.query.doctorId);
     reply.send(patient);
   };
 

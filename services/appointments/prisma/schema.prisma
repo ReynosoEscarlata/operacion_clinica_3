@@ -34,10 +34,16 @@ enum EventType {
 
 // Patients es sub-dominio de Appointments (RFC-001: no se extrae como
 // servicio propio en esta fase — no tiene identidad de auth ni ciclo de
-// vida independiente de la cita).
+// vida independiente de la cita). tenantId NOT NULL (decidido con Ricardo,
+// Fase 3a): un paciente es un registro por clínica, no una entidad global
+// -- la misma persona reservando en dos clínicas distintas genera dos filas
+// separadas. email deja de ser único globalmente (@@unique compuesto con
+// tenantId) porque dos clínicas distintas pueden tener, cada una, un
+// paciente con el mismo email sin ser la misma relación clínica-paciente.
 model Patient {
   id               String   @id @default(uuid()) @db.Uuid
-  email            String   @unique
+  tenantId         String   @db.Uuid
+  email            String
   name             String
   phone            String
   stripeCustomerId String?
@@ -45,10 +51,14 @@ model Patient {
   updatedAt        DateTime @updatedAt
 
   appointments Appointment[]
+
+  @@unique([tenantId, email])
+  @@index([tenantId])
 }
 
 model Appointment {
   id                    String            @id @default(uuid()) @db.Uuid
+  tenantId              String            @db.Uuid
   patientId             String            @db.Uuid
   doctorId              String            @db.Uuid
   dateTime              DateTime
@@ -69,13 +79,14 @@ model Appointment {
   patient Patient            @relation(fields: [patientId], references: [id], onDelete: Restrict)
   events  AppointmentEvent[]
 
-  @@index([status])
-  @@index([dateTime])
-  @@index([doctorId, dateTime])
+  @@index([tenantId, status])
+  @@index([tenantId, dateTime])
+  @@index([tenantId, doctorId, dateTime])
 }
 
 model AppointmentEvent {
   id            String      @id @default(uuid()) @db.Uuid
+  tenantId      String      @db.Uuid
   appointmentId String      @db.Uuid
   type          EventType
   payload       Json
@@ -83,21 +94,23 @@ model AppointmentEvent {
 
   appointment Appointment @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
 
-  @@index([appointmentId])
+  @@index([tenantId, appointmentId])
 }
 
 // Outbox (ADR-002): AppointmentCreated se escribe en la misma transacción
 // que la cita (PLAN.md Fase 2, paso 2, explícito). AppointmentStatusChanged
 // se escribe en cada transición de la state machine. PatientUpdated se
-// escribe al actualizar datos de un paciente. El relay a Redis Streams es
-// Fase 3.
+// escribe al actualizar datos de un paciente. El relay a SQS/SNS es Fase 3b
+// (ADR-014) -- por ahora sigue publicando a Redis Streams tal cual.
 model OutboxEvent {
   id          String    @id @default(uuid()) @db.Uuid
+  tenantId    String    @db.Uuid
   type        String
   payload     Json
   publishedAt DateTime?
   createdAt   DateTime  @default(now())
 
+  @@index([tenantId])
   @@index([publishedAt])
 }
 
@@ -105,8 +118,14 @@ model OutboxEvent {
 // PaymentFailed) que fallaron de forma permanente al procesarse — resuelve
 // el gap documentado en SPEC.md: sin esto, un evento "venenoso" se queda
 // reintentando para siempre en la Pending Entries List de Redis Streams.
+// tenantId NOT NULL, resuelto vía resolve_tenant_for_appointment() a partir
+// del appointmentId embebido en el payload del evento -- el envelope de
+// Redis Streams todavía no lleva tenant_id de punta a punta (eso es Fase 3b,
+// ADR-014), así que se resuelve localmente contra la propia tabla
+// Appointment en el momento de registrar la entrada.
 model DeadLetterEntry {
   id        String   @id @default(uuid()) @db.Uuid
+  tenantId  String   @db.Uuid
   eventId   String
   eventType String
   payload   Json
@@ -114,5 +133,5 @@ model DeadLetterEntry {
   attempts  Int      @default(1)
   failedAt  DateTime @default(now())
 
-  @@index([eventType])
+  @@index([tenantId, eventType])
 }

@@ -1,6 +1,7 @@
 import type { PrismaClient } from '@prisma/client';
 
 import { AppError } from '../../lib/app-error.js';
+import { withTenant } from '../../lib/tenant-scoped.js';
 import { writeOutboxEvent } from '../../lib/outbox.js';
 import type { DeadLetterRepository } from '../../lib/dead-letter.repository.js';
 
@@ -24,7 +25,7 @@ export const buildAdminRepository = (
       throw new AppError(404, 'DEAD_LETTER_NOT_FOUND', 'Entrada de dead-letter no encontrada');
     }
 
-    await prisma.$transaction(async (tx) => {
+    await withTenant(prisma, async (tx) => {
       await writeOutboxEvent(tx, entry.eventType, entry.payload as Record<string, unknown>);
       await tx.deadLetterEntry.delete({ where: { id } });
     });

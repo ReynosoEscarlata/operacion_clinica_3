@@ -11,10 +11,13 @@ import { buildAppointmentRepository } from '../../src/modules/appointments/appoi
 import { buildStateMachine } from '../../src/modules/appointments/state-machine.js';
 import { buildAppointmentService } from '../../src/modules/appointments/appointments.service.js';
 import { logger } from '../../src/lib/logger.js';
+import { runWithTenant } from '../../src/lib/tenant-context.js';
+import { resolveTenantForAppointment, withTenantId } from '../../src/lib/tenant-scoped.js';
 import type { DoctorsClient } from '../../src/clients/doctors-client.js';
 import type { PaymentsClient } from '../../src/clients/payments-client.js';
 
 const GROUP = `test-group-${randomUUID()}`;
+const TEST_TENANT_ID = '66666666-6666-6666-6666-666666666666';
 
 // Simula lo que hace Payments al publicar (escribe directo al stream, sin
 // pasar por su propio Outbox — lo que importa acá es que Appointments lo
@@ -38,7 +41,7 @@ describe('Consumer de eventos de dominio (Redis Streams reales)', () => {
   const doctorId = randomUUID();
 
   const doctorsClient = {
-    getDoctor: async () => ({ id: doctorId, consultationPriceCents: 50_000 }),
+    getDoctor: async () => ({ id: doctorId, tenantId: TEST_TENANT_ID, consultationPriceCents: 50_000 }),
     getAvailableSlots: async () => [],
   } as DoctorsClient;
   const paymentsClient = {} as PaymentsClient;
@@ -61,14 +64,20 @@ describe('Consumer de eventos de dominio (Redis Streams reales)', () => {
       appointmentId: string;
       paymentIntentId: string;
     };
-    try {
-      await appointmentService.confirmPayment(appointmentId, paymentIntentId);
-    } catch (error) {
-      if (error instanceof AppError && error.code === 'INVALID_STATE_TRANSITION') {
-        return;
-      }
-      throw error;
+    const tenantId = await resolveTenantForAppointment(prisma, appointmentId);
+    if (!tenantId) {
+      return;
     }
+    await runWithTenant(tenantId, async () => {
+      try {
+        await appointmentService.confirmPayment(appointmentId, paymentIntentId);
+      } catch (error) {
+        if (error instanceof AppError && error.code === 'INVALID_STATE_TRANSITION') {
+          return;
+        }
+        throw error;
+      }
+    });
   };
 
   const handlePaymentFailed: EventHandler = async (event) => {
@@ -77,7 +86,13 @@ describe('Consumer de eventos de dominio (Redis Streams reales)', () => {
       paymentIntentId: string;
       reason: string | null;
     };
-    await appointmentService.recordPaymentFailed(appointmentId, paymentIntentId, reason);
+    const tenantId = await resolveTenantForAppointment(prisma, appointmentId);
+    if (!tenantId) {
+      return;
+    }
+    await runWithTenant(tenantId, () =>
+      appointmentService.recordPaymentFailed(appointmentId, paymentIntentId, reason),
+    );
   };
 
   beforeAll(async () => {
@@ -87,35 +102,43 @@ describe('Consumer de eventos de dominio (Redis Streams reales)', () => {
     // de corridas anteriores que ya no existen.
     await ensureConsumerGroup(redis, GROUP, '$');
 
-    const patient = await prisma.patient.create({
-      data: {
-        email: `consumer-test-${randomUUID()}@example.com`,
-        name: 'Paciente Consumer Test',
-        phone: '+54 9 11 5555-7777',
-      },
-    });
+    const patient = await withTenantId(prisma, TEST_TENANT_ID, (tx) =>
+      tx.patient.create({
+        data: {
+          tenantId: TEST_TENANT_ID,
+          email: `consumer-test-${randomUUID()}@example.com`,
+          name: 'Paciente Consumer Test',
+          phone: '+54 9 11 5555-7777',
+        },
+      }),
+    );
     patientId = patient.id;
   });
 
   afterAll(async () => {
-    await prisma.appointment.deleteMany({ where: { patientId } });
-    await prisma.patient.delete({ where: { id: patientId } }).catch(() => undefined);
+    await withTenantId(prisma, TEST_TENANT_ID, async (tx) => {
+      await tx.appointment.deleteMany({ where: { patientId } });
+      await tx.patient.delete({ where: { id: patientId } }).catch(() => undefined);
+    });
     await prisma.$disconnect();
     redis.disconnect();
   });
 
   it('PaymentSucceeded: transiciona la cita CONFIRMED -> PAID', async () => {
-    const appointment = await prisma.appointment.create({
-      data: {
-        patientId,
-        doctorId,
-        dateTime: new Date(Date.now() + 86_400_000),
-        durationMinutes: 30,
-        amountCents: 50_000,
-        status: 'CONFIRMED',
-        stripePaymentIntentId: `pi_${randomUUID()}`,
-      },
-    });
+    const appointment = await withTenantId(prisma, TEST_TENANT_ID, (tx) =>
+      tx.appointment.create({
+        data: {
+          tenantId: TEST_TENANT_ID,
+          patientId,
+          doctorId,
+          dateTime: new Date(Date.now() + 86_400_000),
+          durationMinutes: 30,
+          amountCents: 50_000,
+          status: 'CONFIRMED',
+          stripePaymentIntentId: `pi_${randomUUID()}`,
+        },
+      }),
+    );
 
     await publishToStream('PaymentSucceeded', {
       appointmentId: appointment.id,
@@ -135,23 +158,28 @@ describe('Consumer de eventos de dominio (Redis Streams reales)', () => {
 
     expect(processed).toBeGreaterThanOrEqual(1);
 
-    const updated = await prisma.appointment.findUnique({ where: { id: appointment.id } });
+    const updated = await withTenantId(prisma, TEST_TENANT_ID, (tx) =>
+      tx.appointment.findUnique({ where: { id: appointment.id } }),
+    );
     expect(updated?.status).toBe('PAID');
   });
 
   it('es idempotente: un PaymentSucceeded duplicado para una cita ya PAID no rompe el consumer', async () => {
-    const appointment = await prisma.appointment.create({
-      data: {
-        patientId,
-        doctorId,
-        dateTime: new Date(Date.now() + 2 * 86_400_000),
-        durationMinutes: 30,
-        amountCents: 50_000,
-        status: 'PAID',
-        stripePaymentIntentId: `pi_${randomUUID()}`,
-        paidAt: new Date(),
-      },
-    });
+    const appointment = await withTenantId(prisma, TEST_TENANT_ID, (tx) =>
+      tx.appointment.create({
+        data: {
+          tenantId: TEST_TENANT_ID,
+          patientId,
+          doctorId,
+          dateTime: new Date(Date.now() + 2 * 86_400_000),
+          durationMinutes: 30,
+          amountCents: 50_000,
+          status: 'PAID',
+          stripePaymentIntentId: `pi_${randomUUID()}`,
+          paidAt: new Date(),
+        },
+      }),
+    );
 
     await publishToStream('PaymentSucceeded', {
       appointmentId: appointment.id,
@@ -171,22 +199,27 @@ describe('Consumer de eventos de dominio (Redis Streams reales)', () => {
 
     expect(processed).toBeGreaterThanOrEqual(1);
 
-    const updated = await prisma.appointment.findUnique({ where: { id: appointment.id } });
+    const updated = await withTenantId(prisma, TEST_TENANT_ID, (tx) =>
+      tx.appointment.findUnique({ where: { id: appointment.id } }),
+    );
     expect(updated?.status).toBe('PAID');
   });
 
   it('PaymentFailed: registra el evento sin cambiar el estado de la cita', async () => {
-    const appointment = await prisma.appointment.create({
-      data: {
-        patientId,
-        doctorId,
-        dateTime: new Date(Date.now() + 3 * 86_400_000),
-        durationMinutes: 30,
-        amountCents: 50_000,
-        status: 'CONFIRMED',
-        stripePaymentIntentId: `pi_${randomUUID()}`,
-      },
-    });
+    const appointment = await withTenantId(prisma, TEST_TENANT_ID, (tx) =>
+      tx.appointment.create({
+        data: {
+          tenantId: TEST_TENANT_ID,
+          patientId,
+          doctorId,
+          dateTime: new Date(Date.now() + 3 * 86_400_000),
+          durationMinutes: 30,
+          amountCents: 50_000,
+          status: 'CONFIRMED',
+          stripePaymentIntentId: `pi_${randomUUID()}`,
+        },
+      }),
+    );
 
     await publishToStream('PaymentFailed', {
       appointmentId: appointment.id,
@@ -205,10 +238,12 @@ describe('Consumer de eventos de dominio (Redis Streams reales)', () => {
       200,
     );
 
-    const updated = await prisma.appointment.findUnique({
-      where: { id: appointment.id },
-      include: { events: true },
-    });
+    const updated = await withTenantId(prisma, TEST_TENANT_ID, (tx) =>
+      tx.appointment.findUnique({
+        where: { id: appointment.id },
+        include: { events: true },
+      }),
+    );
     expect(updated?.status).toBe('CONFIRMED');
     expect(updated?.events.some((event) => event.type === 'PAYMENT_FAILED')).toBe(true);
   });

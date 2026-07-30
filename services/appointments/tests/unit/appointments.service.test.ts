@@ -11,6 +11,7 @@ import { logger } from '../../src/lib/logger.js';
 
 const buildAppointment = (overrides: Partial<Appointment> = {}): Appointment => ({
   id: 'appt-1',
+  tenantId: '11111111-1111-1111-1111-111111111111',
   patientId: 'patient-1',
   doctorId: 'doctor-1',
   dateTime: new Date(Date.now() + 86_400_000),

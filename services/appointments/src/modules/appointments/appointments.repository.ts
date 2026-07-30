@@ -9,6 +9,8 @@ import type {
 } from '@prisma/client';
 
 import { AppError } from '../../lib/app-error.js';
+import { getTenantId } from '../../lib/tenant-context.js';
+import { withTenant } from '../../lib/tenant-scoped.js';
 import { writeOutboxEvent } from '../../lib/outbox.js';
 
 export interface CreateAppointmentData {
@@ -48,6 +50,11 @@ export interface DashboardStats {
   noShowRateByDoctor: Array<{ doctorId: string; noShowCount: number; completedCount: number; rate: number }>;
 }
 
+export interface ReminderCandidate {
+  id: string;
+  tenantId: string;
+}
+
 export interface AppointmentRepository {
   createPending: (data: CreateAppointmentData) => Promise<Appointment>;
   findById: (id: string) => Promise<AppointmentWithEvents | null>;
@@ -58,6 +65,14 @@ export interface AppointmentRepository {
   addEvent: (appointmentId: string, type: EventType, payload: Prisma.InputJsonObject) => Promise<void>;
   getDashboardStats: () => Promise<DashboardStats>;
   listRecentEvents: (hours: number) => Promise<Array<AppointmentEvent & { appointment: Appointment }>>;
+  /**
+   * Escaneo CROSS-TENANT deliberado (ver migración SQL,
+   * list_reminded_appointments_before): el job de no-show necesita
+   * encontrar candidatos en TODOS los tenants. Devuelve solo id+tenantId,
+   * nunca la fila completa -- el caller debe resolver cada candidato dentro
+   * de su propio runWithTenant antes de leer cualquier otro dato.
+   */
+  listRemindedBefore: (cutoff: Date) => Promise<ReminderCandidate[]>;
 }
 
 const MAX_LIST_RESULTS = 200;
@@ -89,8 +104,14 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
   constructor(private readonly prisma: PrismaClient) {}
 
   async createPending(data: CreateAppointmentData): Promise<Appointment> {
+    const tenantId = getTenantId();
+    if (!tenantId) {
+      throw new Error('createPending() llamado sin tenant en contexto');
+    }
+
     try {
-      return await this.prisma.$transaction(
+      return await withTenant(
+        this.prisma,
         async (tx) => {
           const conflicting = await tx.appointment.findFirst({
             where: {
@@ -104,10 +125,11 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
             throw new AppError(409, 'SLOT_UNAVAILABLE', 'El horario ya no está disponible');
           }
 
-          const appointment = await tx.appointment.create({ data });
+          const appointment = await tx.appointment.create({ data: { ...data, tenantId } });
 
           await tx.appointmentEvent.create({
             data: {
+              tenantId,
               appointmentId: appointment.id,
               type: 'CREATED',
               payload: { patientId: data.patientId, doctorId: data.doctorId },
@@ -136,129 +158,136 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
   }
 
   async findById(id: string): Promise<AppointmentWithEvents | null> {
-    return this.prisma.appointment.findUnique({
-      where: { id },
-      include: { events: { orderBy: { createdAt: 'asc' } }, patient: true },
-    });
+    return withTenant(this.prisma, (tx) =>
+      tx.appointment.findUnique({
+        where: { id },
+        include: { events: { orderBy: { createdAt: 'asc' } }, patient: true },
+      }),
+    );
   }
 
   async findStatusById(id: string): Promise<AppointmentStatus | null> {
-    const appointment = await this.prisma.appointment.findUnique({
-      where: { id },
-      select: { status: true },
+    return withTenant(this.prisma, async (tx) => {
+      const appointment = await tx.appointment.findUnique({ where: { id }, select: { status: true } });
+      return appointment?.status ?? null;
     });
-    return appointment?.status ?? null;
   }
 
   async findByPaymentIntentId(stripePaymentIntentId: string): Promise<Appointment | null> {
-    return this.prisma.appointment.findUnique({ where: { stripePaymentIntentId } });
+    return withTenant(this.prisma, (tx) => tx.appointment.findUnique({ where: { stripePaymentIntentId } }));
   }
 
   async list(filters: ListAppointmentsFilters): Promise<ListAppointmentsResult> {
-    const where: Prisma.AppointmentWhereInput = {
-      ...(filters.status ? { status: filters.status } : {}),
-      ...(filters.doctorId ? { doctorId: filters.doctorId } : {}),
-      ...(filters.patientId ? { patientId: filters.patientId } : {}),
-      ...(filters.dateRange ? { dateTime: { gte: filters.dateRange.start, lt: filters.dateRange.end } } : {}),
-    };
+    return withTenant(this.prisma, async (tx) => {
+      const where: Prisma.AppointmentWhereInput = {
+        ...(filters.status ? { status: filters.status } : {}),
+        ...(filters.doctorId ? { doctorId: filters.doctorId } : {}),
+        ...(filters.patientId ? { patientId: filters.patientId } : {}),
+        ...(filters.dateRange ? { dateTime: { gte: filters.dateRange.start, lt: filters.dateRange.end } } : {}),
+      };
 
-    // Paginación por cursor (no offset): se pide una página de más
-    // (PAGE_SIZE + 1) para saber si hay siguiente sin un COUNT(*) extra.
-    const isPaginatedQuery = filters.paginate === true;
-    const take = isPaginatedQuery ? PAGE_SIZE + 1 : MAX_LIST_RESULTS;
+      // Paginación por cursor (no offset): se pide una página de más
+      // (PAGE_SIZE + 1) para saber si hay siguiente sin un COUNT(*) extra.
+      const isPaginatedQuery = filters.paginate === true;
+      const take = isPaginatedQuery ? PAGE_SIZE + 1 : MAX_LIST_RESULTS;
 
-    const rows = await this.prisma.appointment.findMany({
-      where,
-      orderBy: [{ dateTime: 'desc' }, { id: 'desc' }],
-      take,
-      ...(filters.cursor ? { cursor: { id: filters.cursor }, skip: 1 } : {}),
-      include: { patient: true },
+      const rows = await tx.appointment.findMany({
+        where,
+        orderBy: [{ dateTime: 'desc' }, { id: 'desc' }],
+        take,
+        ...(filters.cursor ? { cursor: { id: filters.cursor }, skip: 1 } : {}),
+        include: { patient: true },
+      });
+
+      if (!isPaginatedQuery || rows.length <= PAGE_SIZE) {
+        return { items: rows, nextCursor: null };
+      }
+
+      const items = rows.slice(0, PAGE_SIZE);
+      return { items, nextCursor: items[items.length - 1]?.id ?? null };
     });
-
-    if (!isPaginatedQuery || rows.length <= PAGE_SIZE) {
-      return { items: rows, nextCursor: null };
-    }
-
-    const items = rows.slice(0, PAGE_SIZE);
-    return { items, nextCursor: items[items.length - 1]?.id ?? null };
   }
 
   async getDashboardStats(): Promise<DashboardStats> {
-    const now = new Date();
-    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    const startOfWeek = new Date(startOfToday.getTime() - startOfToday.getDay() * 86_400_000);
-    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    return withTenant(this.prisma, async (tx) => {
+      const now = new Date();
+      const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      const startOfWeek = new Date(startOfToday.getTime() - startOfToday.getDay() * 86_400_000);
+      const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
 
-    const [appointmentsToday, appointmentsThisWeek, statusCounts, revenueToday, revenueThisWeek, revenueThisMonth, byDoctor] =
-      await Promise.all([
-        this.prisma.appointment.count({ where: { dateTime: { gte: startOfToday } } }),
-        this.prisma.appointment.count({ where: { dateTime: { gte: startOfWeek } } }),
-        this.prisma.appointment.groupBy({ by: ['status'], _count: { _all: true } }),
-        this.prisma.appointment.aggregate({
-          _sum: { amountCents: true },
-          where: { status: { in: REVENUE_STATUSES }, paidAt: { gte: startOfToday } },
-        }),
-        this.prisma.appointment.aggregate({
-          _sum: { amountCents: true },
-          where: { status: { in: REVENUE_STATUSES }, paidAt: { gte: startOfWeek } },
-        }),
-        this.prisma.appointment.aggregate({
-          _sum: { amountCents: true },
-          where: { status: { in: REVENUE_STATUSES }, paidAt: { gte: startOfMonth } },
-        }),
-        this.prisma.appointment.groupBy({
-          by: ['doctorId', 'status'],
-          _count: { _all: true },
-          where: { status: { in: ['NO_SHOW', 'COMPLETED'] } },
-        }),
-      ]);
+      const [appointmentsToday, appointmentsThisWeek, statusCounts, revenueToday, revenueThisWeek, revenueThisMonth, byDoctor] =
+        await Promise.all([
+          tx.appointment.count({ where: { dateTime: { gte: startOfToday } } }),
+          tx.appointment.count({ where: { dateTime: { gte: startOfWeek } } }),
+          tx.appointment.groupBy({ by: ['status'], _count: { _all: true } }),
+          tx.appointment.aggregate({
+            _sum: { amountCents: true },
+            where: { status: { in: REVENUE_STATUSES }, paidAt: { gte: startOfToday } },
+          }),
+          tx.appointment.aggregate({
+            _sum: { amountCents: true },
+            where: { status: { in: REVENUE_STATUSES }, paidAt: { gte: startOfWeek } },
+          }),
+          tx.appointment.aggregate({
+            _sum: { amountCents: true },
+            where: { status: { in: REVENUE_STATUSES }, paidAt: { gte: startOfMonth } },
+          }),
+          tx.appointment.groupBy({
+            by: ['doctorId', 'status'],
+            _count: { _all: true },
+            where: { status: { in: ['NO_SHOW', 'COMPLETED'] } },
+          }),
+        ]);
 
-    const byStatus = ALL_STATUSES.reduce(
-      (acc, status) => {
-        acc[status] = statusCounts.find((row) => row.status === status)?._count._all ?? 0;
-        return acc;
-      },
-      {} as Record<AppointmentStatus, number>,
-    );
+      const byStatus = ALL_STATUSES.reduce(
+        (acc, status) => {
+          acc[status] = statusCounts.find((row) => row.status === status)?._count._all ?? 0;
+          return acc;
+        },
+        {} as Record<AppointmentStatus, number>,
+      );
 
-    const byDoctorMap = new Map<string, { noShowCount: number; completedCount: number }>();
-    for (const row of byDoctor) {
-      const entry = byDoctorMap.get(row.doctorId) ?? { noShowCount: 0, completedCount: 0 };
-      if (row.status === 'NO_SHOW') entry.noShowCount = row._count._all;
-      if (row.status === 'COMPLETED') entry.completedCount = row._count._all;
-      byDoctorMap.set(row.doctorId, entry);
-    }
+      const byDoctorMap = new Map<string, { noShowCount: number; completedCount: number }>();
+      for (const row of byDoctor) {
+        const entry = byDoctorMap.get(row.doctorId) ?? { noShowCount: 0, completedCount: 0 };
+        if (row.status === 'NO_SHOW') entry.noShowCount = row._count._all;
+        if (row.status === 'COMPLETED') entry.completedCount = row._count._all;
+        byDoctorMap.set(row.doctorId, entry);
+      }
 
-    const noShowRateByDoctor = Array.from(byDoctorMap.entries()).map(([doctorId, counts]) => {
-      const total = counts.noShowCount + counts.completedCount;
-      return { doctorId, ...counts, rate: total === 0 ? 0 : counts.noShowCount / total };
+      const noShowRateByDoctor = Array.from(byDoctorMap.entries()).map(([doctorId, counts]) => {
+        const total = counts.noShowCount + counts.completedCount;
+        return { doctorId, ...counts, rate: total === 0 ? 0 : counts.noShowCount / total };
+      });
+
+      return {
+        appointmentsToday,
+        appointmentsThisWeek,
+        byStatus,
+        revenue: {
+          today: revenueToday._sum.amountCents ?? 0,
+          thisWeek: revenueThisWeek._sum.amountCents ?? 0,
+          thisMonth: revenueThisMonth._sum.amountCents ?? 0,
+        },
+        noShowRateByDoctor,
+      };
     });
-
-    return {
-      appointmentsToday,
-      appointmentsThisWeek,
-      byStatus,
-      revenue: {
-        today: revenueToday._sum.amountCents ?? 0,
-        thisWeek: revenueThisWeek._sum.amountCents ?? 0,
-        thisMonth: revenueThisMonth._sum.amountCents ?? 0,
-      },
-      noShowRateByDoctor,
-    };
   }
 
   async listRecentEvents(hours: number): Promise<Array<AppointmentEvent & { appointment: Appointment }>> {
-    const since = new Date(Date.now() - hours * 60 * 60 * 1000);
-    return this.prisma.appointmentEvent.findMany({
-      where: { createdAt: { gte: since } },
-      orderBy: { createdAt: 'desc' },
-      take: MAX_LIST_RESULTS,
-      include: { appointment: true },
+    return withTenant(this.prisma, (tx) => {
+      const since = new Date(Date.now() - hours * 60 * 60 * 1000);
+      return tx.appointmentEvent.findMany({
+        where: { createdAt: { gte: since } },
+        orderBy: { createdAt: 'desc' },
+        take: MAX_LIST_RESULTS,
+        include: { appointment: true },
+      });
     });
   }
 
   async deleteHard(id: string): Promise<void> {
-    await this.prisma.appointment.delete({ where: { id } });
+    await withTenant(this.prisma, (tx) => tx.appointment.delete({ where: { id } }));
   }
 
   async addEvent(
@@ -266,7 +295,19 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
     type: EventType,
     payload: Prisma.InputJsonObject,
   ): Promise<void> {
-    await this.prisma.appointmentEvent.create({ data: { appointmentId, type, payload } });
+    const tenantId = getTenantId();
+    if (!tenantId) {
+      throw new Error('addEvent() llamado sin tenant en contexto');
+    }
+    await withTenant(this.prisma, (tx) =>
+      tx.appointmentEvent.create({ data: { tenantId, appointmentId, type, payload } }),
+    );
+  }
+
+  async listRemindedBefore(cutoff: Date): Promise<ReminderCandidate[]> {
+    return this.prisma.$queryRaw<ReminderCandidate[]>`
+      SELECT id, "tenantId" FROM list_reminded_appointments_before(${cutoff})
+    `;
   }
 }
 

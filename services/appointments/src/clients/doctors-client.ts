@@ -2,6 +2,7 @@ import { AppError } from '../lib/app-error.js';
 
 export interface DoctorBasic {
   id: string;
+  tenantId: string;
   consultationPriceCents: number;
 }
 
@@ -30,7 +31,7 @@ export const buildHttpDoctorsClient = (baseUrl: string): DoctorsClient => ({
       return DOCTORS_UNAVAILABLE();
     }
     const body = (await response.json()) as DoctorBasic;
-    return { id: body.id, consultationPriceCents: body.consultationPriceCents };
+    return { id: body.id, tenantId: body.tenantId, consultationPriceCents: body.consultationPriceCents };
   },
 
   getAvailableSlots: async (doctorId, date) => {

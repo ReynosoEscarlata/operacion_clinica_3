@@ -6,7 +6,13 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { buildApp } from '../../src/app.js';
 import { prisma } from '../../src/config/prisma.js';
 import { AppError } from '../../src/lib/app-error.js';
+import { withTenantId } from '../../src/lib/tenant-scoped.js';
+import type { DoctorsClient } from '../../src/clients/doctors-client.js';
 import type { PaymentsClient } from '../../src/clients/payments-client.js';
+
+const TEST_TENANT_ID = '55555555-5555-5555-5555-555555555555';
+const TENANT_HEADERS = { 'x-internal-tenant-id': TEST_TENANT_ID };
+const doctorId = randomUUID();
 
 const fakePaymentsClient: PaymentsClient = {
   createCustomer: vi.fn().mockResolvedValue({ id: 'cus_fake_123' }),
@@ -15,19 +21,30 @@ const fakePaymentsClient: PaymentsClient = {
   createRefund: vi.fn(),
 };
 
+const fakeDoctorsClient: DoctorsClient = {
+  getDoctor: vi
+    .fn()
+    .mockImplementation(async (id: string) =>
+      id === doctorId ? { id: doctorId, tenantId: TEST_TENANT_ID, consultationPriceCents: 70_000 } : null,
+    ),
+  getAvailableSlots: vi.fn().mockResolvedValue([]),
+};
+
 describe('Patients CRUD (integración con DB real, Payments mockeado)', () => {
   let app: FastifyInstance;
   const testEmail = `patient-${randomUUID()}@example.com`;
   let createdId: string;
 
   beforeAll(async () => {
-    app = await buildApp({ patients: { paymentsClient: fakePaymentsClient } });
+    app = await buildApp({ patients: { paymentsClient: fakePaymentsClient, doctorsClient: fakeDoctorsClient } });
     await app.ready();
   });
 
   afterAll(async () => {
     if (createdId) {
-      await prisma.patient.delete({ where: { id: createdId } }).catch(() => undefined);
+      await withTenantId(prisma, TEST_TENANT_ID, (tx) => tx.patient.delete({ where: { id: createdId } })).catch(
+        () => undefined,
+      );
     }
     await app.close();
     await prisma.$disconnect();
@@ -37,7 +54,7 @@ describe('Patients CRUD (integración con DB real, Payments mockeado)', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/v1/patients',
-      payload: { email: testEmail, name: 'Test Patient', phone: '+54 9 11 5555-9999' },
+      payload: { doctorId, email: testEmail, name: 'Test Patient', phone: '+54 9 11 5555-9999' },
     });
 
     expect(response.statusCode).toBe(201);
@@ -52,7 +69,7 @@ describe('Patients CRUD (integración con DB real, Payments mockeado)', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/v1/patients',
-      payload: { email: testEmail, name: 'Otro Nombre', phone: '+54 9 11 5555-0000' },
+      payload: { doctorId, email: testEmail, name: 'Otro Nombre', phone: '+54 9 11 5555-0000' },
     });
 
     expect(response.statusCode).toBe(409);
@@ -81,7 +98,7 @@ describe('Patients CRUD (integración con DB real, Payments mockeado)', () => {
   it('busca un paciente por email (usado por el flujo público de reserva)', async () => {
     const response = await app.inject({
       method: 'GET',
-      url: `/v1/patients/by-email?email=${encodeURIComponent(testEmail)}`,
+      url: `/v1/patients/by-email?doctorId=${doctorId}&email=${encodeURIComponent(testEmail)}`,
     });
 
     expect(response.statusCode).toBe(200);
@@ -92,7 +109,7 @@ describe('Patients CRUD (integración con DB real, Payments mockeado)', () => {
     const unknownEmail = `nadie-${randomUUID()}@example.com`;
     const response = await app.inject({
       method: 'GET',
-      url: `/v1/patients/by-email?email=${encodeURIComponent(unknownEmail)}`,
+      url: `/v1/patients/by-email?doctorId=${doctorId}&email=${encodeURIComponent(unknownEmail)}`,
     });
 
     expect(response.statusCode).toBe(404);
@@ -102,7 +119,7 @@ describe('Patients CRUD (integración con DB real, Payments mockeado)', () => {
   it('rechaza un email con formato inválido en la búsqueda por email', async () => {
     const response = await app.inject({
       method: 'GET',
-      url: '/v1/patients/by-email?email=no-es-un-email',
+      url: `/v1/patients/by-email?doctorId=${doctorId}&email=no-es-un-email`,
     });
 
     expect(response.statusCode).toBe(400);
@@ -112,13 +129,16 @@ describe('Patients CRUD (integración con DB real, Payments mockeado)', () => {
     const response = await app.inject({
       method: 'PATCH',
       url: `/v1/patients/${createdId}`,
+      headers: TENANT_HEADERS,
       payload: { name: 'Nombre Actualizado' },
     });
 
     expect(response.statusCode).toBe(200);
     expect(response.json().name).toBe('Nombre Actualizado');
 
-    const events = await prisma.outboxEvent.findMany({ where: { type: 'PatientUpdated' } });
+    const events = await withTenantId(prisma, TEST_TENANT_ID, (tx) =>
+      tx.outboxEvent.findMany({ where: { type: 'PatientUpdated' } }),
+    );
     const match = events.find((event) => (event.payload as { patientId?: string }).patientId === createdId);
     expect(match).toBeDefined();
     expect(match?.publishedAt).toBeNull();
@@ -128,6 +148,7 @@ describe('Patients CRUD (integración con DB real, Payments mockeado)', () => {
     const response = await app.inject({
       method: 'PATCH',
       url: `/v1/patients/${randomUUID()}`,
+      headers: TENANT_HEADERS,
       payload: { name: 'No existe' },
     });
 
@@ -135,7 +156,11 @@ describe('Patients CRUD (integración con DB real, Payments mockeado)', () => {
   });
 
   it('lista pacientes con paginación cursor-based', async () => {
-    const response = await app.inject({ method: 'GET', url: '/v1/patients?limit=1' });
+    const response = await app.inject({
+      method: 'GET',
+      url: '/v1/patients?limit=1',
+      headers: TENANT_HEADERS,
+    });
 
     expect(response.statusCode).toBe(200);
     const body = response.json();
@@ -150,13 +175,16 @@ describe('Patients CRUD (integración con DB real, Payments mockeado)', () => {
         .fn()
         .mockRejectedValue(new AppError(502, 'PAYMENTS_UNAVAILABLE', 'Servicio de pago no disponible')),
     };
-    const failingApp = await buildApp({ patients: { paymentsClient: failingPaymentsClient } });
+    const failingApp = await buildApp({
+      patients: { paymentsClient: failingPaymentsClient, doctorsClient: fakeDoctorsClient },
+    });
     await failingApp.ready();
 
     const response = await failingApp.inject({
       method: 'POST',
       url: '/v1/patients',
       payload: {
+        doctorId,
         email: `fail-${randomUUID()}@example.com`,
         name: 'Payments Down',
         phone: '+54 9 11 5555-0001',
