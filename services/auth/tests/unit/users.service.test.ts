@@ -5,8 +5,11 @@ import { buildUsersService } from '../../src/modules/users/users.service.js';
 import type { CreateUserData, UsersRepository } from '../../src/modules/users/users.repository.js';
 import { logger } from '../../src/lib/logger.js';
 
+const TENANT_A = '11111111-1111-1111-1111-111111111111';
+
 const buildUser = (overrides: Partial<User> = {}): User => ({
   id: 'user-1',
+  tenantId: TENANT_A,
   email: 'admin@clinica.test',
   name: 'Admin',
   passwordHash: 'hashed',
@@ -34,6 +37,16 @@ const buildFakeRepository = (initial: User[] = []): UsersRepository => {
       if (!user) return null;
       user.active = false;
       return user;
+    },
+    findByEmailForLogin: async (email) => {
+      const user = users.find((u) => u.email === email);
+      if (!user) return null;
+      return { id: user.id, tenantId: user.tenantId, passwordHash: user.passwordHash, active: user.active, role: user.role };
+    },
+    findByIdForRefresh: async (id) => {
+      const user = users.find((u) => u.id === id);
+      if (!user) return null;
+      return { id: user.id, tenantId: user.tenantId, active: user.active, role: user.role };
     },
   };
 };

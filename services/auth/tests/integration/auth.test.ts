@@ -7,6 +7,10 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { buildApp } from '../../src/app.js';
 import { prisma } from '../../src/config/prisma.js';
 import { env } from '../../src/config/env.js';
+import { withTenantId } from '../../src/lib/tenant-scoped.js';
+
+const TEST_TENANT_ID = '44444444-4444-4444-4444-444444444444';
+const TENANT_HEADERS = { 'x-internal-tenant-id': TEST_TENANT_ID };
 
 describe('Login / refresh / JWKS (integración con DB real)', () => {
   let app: FastifyInstance;
@@ -25,14 +29,17 @@ describe('Login / refresh / JWKS (integración con DB real)', () => {
     const created = await app.inject({
       method: 'POST',
       url: '/v1/users',
+      headers: TENANT_HEADERS,
       payload: { email, name: 'Admin de Prueba', role: 'ADMIN', password },
     });
     userId = created.json().id;
   });
 
   afterAll(async () => {
-    await prisma.refreshToken.deleteMany({ where: { userId } });
-    await prisma.user.delete({ where: { id: userId } }).catch(() => undefined);
+    await withTenantId(prisma, TEST_TENANT_ID, async (tx) => {
+      await tx.refreshToken.deleteMany({ where: { userId } });
+      await tx.user.delete({ where: { id: userId } }).catch(() => undefined);
+    });
     await app.close();
     await prisma.$disconnect();
   });
@@ -57,6 +64,7 @@ describe('Login / refresh / JWKS (integración con DB real)', () => {
     const { payload } = await jwtVerify(accessToken, jwks);
     expect(payload.sub).toBe(userId);
     expect(payload['role']).toBe('ADMIN');
+    expect(payload['tenant_id']).toBe(TEST_TENANT_ID);
   });
 
   it('login con password incorrecto retorna 401 UNAUTHORIZED', async () => {
@@ -97,7 +105,11 @@ describe('Login / refresh / JWKS (integración con DB real)', () => {
   });
 
   it('un usuario desactivado no puede loguearse', async () => {
-    await app.inject({ method: 'PATCH', url: `/v1/users/${userId}/deactivate` });
+    await app.inject({
+      method: 'PATCH',
+      url: `/v1/users/${userId}/deactivate`,
+      headers: TENANT_HEADERS,
+    });
 
     const response = await app.inject({
       method: 'POST',

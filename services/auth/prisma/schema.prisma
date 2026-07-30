@@ -12,8 +12,14 @@ enum UserRole {
   STAFF
 }
 
+// tenantId NULLABLE (RFC-003-tenancy.md, "Usuarios de plataforma en el modelo
+// de datos"): NULL identifica exclusivamente a roles de plataforma
+// (platform_admin/platform_support, RFC-004) — no es un tenant más, es la
+// ausencia explícita de tenant. La política RLS de esta tabla tiene una
+// excepción explícita para ese caso (ver migración SQL).
 model User {
   id           String    @id @default(uuid()) @db.Uuid
+  tenantId     String?   @db.Uuid
   email        String    @unique
   name         String
   passwordHash String
@@ -23,12 +29,19 @@ model User {
   updatedAt    DateTime  @updatedAt
 
   refreshTokens RefreshToken[]
+
+  @@index([tenantId])
 }
 
 // Hash del refresh token (nunca el token en texto plano), con rotación:
 // al refrescar, el token usado se revoca y se emite uno nuevo.
+// tenantId denormalizado desde User (NOT NULL: un token de plataforma sin
+// tenant no es un caso soportado hoy — los roles de plataforma no se
+// construyen en esta fase, ver ADR-005/RFC-003) — necesario para que la
+// política RLS de esta tabla no dependa de un JOIN contra User.
 model RefreshToken {
   id        String    @id @default(uuid()) @db.Uuid
+  tenantId  String    @db.Uuid
   userId    String    @db.Uuid
   tokenHash String    @unique
   expiresAt DateTime
@@ -37,18 +50,21 @@ model RefreshToken {
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  @@index([userId])
+  @@index([tenantId, userId])
 }
 
 // Outbox (ADR-002-transacciones-distribuidas.md): UserCreated/UserDeactivated
-// se escriben aquí en la misma transacción que el cambio de User. El relay
-// que los publica a Redis Streams se implementa en la Fase 3 del plan.
+// se escriben aquí en la misma transacción que el cambio de User. tenantId
+// nullable, igual que User (un evento de un usuario de plataforma no tiene
+// tenant). El relay que los publica es trabajo de la Fase 3b (ADR-014).
 model OutboxEvent {
   id          String    @id @default(uuid()) @db.Uuid
+  tenantId    String?   @db.Uuid
   type        String
   payload     Json
   publishedAt DateTime?
   createdAt   DateTime  @default(now())
 
+  @@index([tenantId])
   @@index([publishedAt])
 }

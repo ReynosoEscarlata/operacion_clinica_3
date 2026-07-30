@@ -5,6 +5,10 @@ const schema = z.object({
   PORT: z.coerce.number().default(4001),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace']).default('info'),
   DATABASE_URL: z.string().min(1),
+  // Rol restringido (sin BYPASSRLS, ADR-006) -- el que usa el proceso en
+  // runtime. DATABASE_URL (arriba) es el rol de migración/owner, usado solo
+  // por `prisma migrate deploy`. Ver docs/runbooks/migracion-tenant-id.md.
+  DATABASE_URL_APP: z.string().min(1),
   REDIS_URL: z.string().min(1),
   SENTRY_DSN: z.string().optional().default(''),
   BCRYPT_SALT_ROUNDS: z.coerce.number().int().positive().default(10),

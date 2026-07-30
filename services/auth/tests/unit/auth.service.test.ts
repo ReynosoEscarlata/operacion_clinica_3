@@ -1,11 +1,16 @@
-import type { RefreshToken, User } from '@prisma/client';
+import type { User } from '@prisma/client';
 import { describe, expect, it } from 'vitest';
 
 import { logger } from '../../src/lib/logger.js';
 import { hashPassword } from '../../src/lib/password.js';
 import { buildAuthService } from '../../src/modules/auth/auth.service.js';
-import type { RefreshTokenRepository } from '../../src/modules/auth/refresh-token.repository.js';
+import type {
+  RefreshTokenLookup,
+  RefreshTokenRepository,
+} from '../../src/modules/auth/refresh-token.repository.js';
 import type { UsersRepository } from '../../src/modules/users/users.repository.js';
+
+const TENANT_A = '11111111-1111-1111-1111-111111111111';
 
 const buildUsersRepository = (users: User[]): UsersRepository => ({
   create: async () => {
@@ -15,27 +20,36 @@ const buildUsersRepository = (users: User[]): UsersRepository => ({
   findById: async (id) => users.find((u) => u.id === id) ?? null,
   list: async () => users,
   deactivate: async () => null,
+  findByEmailForLogin: async (email) => {
+    const user = users.find((u) => u.email === email);
+    if (!user) return null;
+    return { id: user.id, tenantId: user.tenantId, passwordHash: user.passwordHash, active: user.active, role: user.role };
+  },
+  findByIdForRefresh: async (id) => {
+    const user = users.find((u) => u.id === id);
+    if (!user) return null;
+    return { id: user.id, tenantId: user.tenantId, active: user.active, role: user.role };
+  },
 });
 
 const buildRefreshTokenRepository = (): RefreshTokenRepository & { issued: string[] } => {
-  const records = new Map<string, RefreshToken>();
+  const records = new Map<string, RefreshTokenLookup>();
   const issued: string[] = [];
 
   return {
     issued,
-    issue: async (userId: string) => {
+    issue: async (userId: string, tenantId: string) => {
       const plain = `refresh-${records.size + 1}`;
-      const record: RefreshToken = {
+      const record: RefreshTokenLookup = {
         id: `rt-${records.size + 1}`,
+        tenantId,
         userId,
-        tokenHash: plain,
         expiresAt: new Date(Date.now() + 60_000),
         revokedAt: null,
-        createdAt: new Date(),
       };
       records.set(plain, record);
       issued.push(plain);
-      return { plain, record };
+      return { plain, record: { ...record, tokenHash: plain, createdAt: new Date() } };
     },
     findActiveByToken: async (plain: string) => {
       const record = records.get(plain);
@@ -52,19 +66,23 @@ const buildRefreshTokenRepository = (): RefreshTokenRepository & { issued: strin
   };
 };
 
+const buildUser = (overrides: Partial<User> = {}): User => ({
+  id: 'user-1',
+  tenantId: TENANT_A,
+  email: 'admin@clinica.test',
+  name: 'Admin',
+  passwordHash: '',
+  role: 'ADMIN',
+  active: true,
+  createdAt: new Date(),
+  updatedAt: new Date(),
+  ...overrides,
+});
+
 describe('AuthService', () => {
   it('login exitoso devuelve accessToken y refreshToken', async () => {
     const passwordHash = await hashPassword('correcto-123');
-    const user: User = {
-      id: 'user-1',
-      email: 'admin@clinica.test',
-      name: 'Admin',
-      passwordHash,
-      role: 'ADMIN',
-      active: true,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    };
+    const user = buildUser({ passwordHash });
 
     const service = buildAuthService({
       usersRepository: buildUsersRepository([user]),
@@ -80,16 +98,7 @@ describe('AuthService', () => {
 
   it('login con password incorrecto lanza UNAUTHORIZED', async () => {
     const passwordHash = await hashPassword('correcto-123');
-    const user: User = {
-      id: 'user-1',
-      email: 'admin@clinica.test',
-      name: 'Admin',
-      passwordHash,
-      role: 'ADMIN',
-      active: true,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    };
+    const user = buildUser({ passwordHash });
 
     const service = buildAuthService({
       usersRepository: buildUsersRepository([user]),
@@ -104,16 +113,7 @@ describe('AuthService', () => {
 
   it('login de usuario desactivado lanza UNAUTHORIZED', async () => {
     const passwordHash = await hashPassword('correcto-123');
-    const user: User = {
-      id: 'user-1',
-      email: 'admin@clinica.test',
-      name: 'Admin',
-      passwordHash,
-      role: 'ADMIN',
-      active: false,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    };
+    const user = buildUser({ passwordHash, active: false });
 
     const service = buildAuthService({
       usersRepository: buildUsersRepository([user]),
@@ -126,18 +126,24 @@ describe('AuthService', () => {
     });
   });
 
+  it('login de usuario de plataforma (tenantId null) no soportado en esta fase', async () => {
+    const passwordHash = await hashPassword('correcto-123');
+    const user = buildUser({ passwordHash, tenantId: null });
+
+    const service = buildAuthService({
+      usersRepository: buildUsersRepository([user]),
+      refreshTokenRepository: buildRefreshTokenRepository(),
+      logger,
+    });
+
+    await expect(service.login('admin@clinica.test', 'correcto-123')).rejects.toMatchObject({
+      code: 'PLATFORM_USER_LOGIN_NOT_SUPPORTED',
+    });
+  });
+
   it('refresh rota el token: el anterior queda inválido tras usarse', async () => {
     const passwordHash = await hashPassword('correcto-123');
-    const user: User = {
-      id: 'user-1',
-      email: 'admin@clinica.test',
-      name: 'Admin',
-      passwordHash,
-      role: 'ADMIN',
-      active: true,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    };
+    const user = buildUser({ passwordHash });
 
     const refreshTokenRepository = buildRefreshTokenRepository();
     const service = buildAuthService({

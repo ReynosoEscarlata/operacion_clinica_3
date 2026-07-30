@@ -6,7 +6,7 @@ import { signAccessToken } from '../../src/lib/jwt.js';
 
 describe('JWT stateless con JWKS (RFC-001 decisión 2)', () => {
   it('firma un token verificable con la llave pública publicada en JWKS', async () => {
-    const token = await signAccessToken({ sub: 'user-1', role: 'ADMIN' });
+    const token = await signAccessToken({ sub: 'user-1', role: 'ADMIN', tenantId: '11111111-1111-1111-1111-111111111111' });
     const { publicJwk } = await getSigningKeys();
 
     const jwks = createLocalJWKSet({ keys: [publicJwk] });
@@ -14,10 +14,20 @@ describe('JWT stateless con JWKS (RFC-001 decisión 2)', () => {
 
     expect(payload.sub).toBe('user-1');
     expect(payload['role']).toBe('ADMIN');
+    expect(payload['tenant_id']).toBe('11111111-1111-1111-1111-111111111111');
+  });
+
+  it('firma tenant_id null para roles de plataforma (RFC-003)', async () => {
+    const token = await signAccessToken({ sub: 'user-1', role: 'platform_admin', tenantId: null });
+    const { publicJwk } = await getSigningKeys();
+    const jwks = createLocalJWKSet({ keys: [publicJwk] });
+    const { payload } = await jwtVerify(token, jwks);
+
+    expect(payload['tenant_id']).toBeNull();
   });
 
   it('rechaza un token firmado con una llave distinta', async () => {
-    const token = await signAccessToken({ sub: 'user-1', role: 'ADMIN' });
+    const token = await signAccessToken({ sub: 'user-1', role: 'ADMIN', tenantId: '11111111-1111-1111-1111-111111111111' });
 
     // JWKS con un kid que no coincide con el de la llave real, simulando
     // un servicio que cacheó un JWKS desactualizado.

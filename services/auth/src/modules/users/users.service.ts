@@ -10,6 +10,7 @@ export type PublicUser = Omit<User, 'passwordHash'>;
 
 const toPublicUser = (user: User): PublicUser => ({
   id: user.id,
+  tenantId: user.tenantId,
   email: user.email,
   name: user.name,
   role: user.role,
