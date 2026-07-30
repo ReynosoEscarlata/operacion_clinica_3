@@ -1,7 +1,7 @@
 # ADR-008: Herramienta de IaC (CDK vs. Terraform)
 
 **Fecha:** 2026-07-29
-**Estado:** Propuesto — inclinación registrada, **PENDIENTE DE RATIFICACIÓN HUMANA**
+**Estado:** Aceptado (2026-07-29)
 **Decisor(es):** Ricardo Reynoso
 
 ## Contexto
@@ -33,8 +33,8 @@ afecta el código de aplicación, pero sí quién puede mantenerla y con qué ve
 
 ## Decisión
 
-**PENDIENTE DE RATIFICACIÓN HUMANA.** Inclinación registrada en Fase 0: CDK en TypeScript, sin
-objeción de Ricardo.
+Elegimos la **Opción 1: AWS CDK en TypeScript**. Ratificada por Ricardo el 2026-07-29 sobre la
+inclinación de Fase 0.
 
 ## Consecuencias
 
