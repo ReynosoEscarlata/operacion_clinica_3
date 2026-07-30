@@ -476,3 +476,24 @@ Peligro    → fondo white, borde danger, texto danger, hover red-50
 - `docs/ADR-001-idempotency.md` — Estrategia de idempotencia (se crea en Fase 9)
 - `docs/ADR-002-retry-strategy.md` — Estrategia de retry (se crea en Fase 9)
 - `docs/RUNBOOK.md` — Procedimientos de respuesta a fallos (se crea en Fase 9)
+
+## Guardrails — Challenge 5 ("Plataforma para todos", SaaS multi-tenant en AWS)
+
+Plan maestro: `claude/PLAN-challenge-5-plataforma-para-todos.md`. Estado: Fase 0 (inventario)
+completada — `docs/baseline-challenge-4.md`, `docs/backlog-deuda.md`.
+
+- NUNCA tomes decisiones de arquitectura marcadas como "PENDIENTE DE DECISIÓN HUMANA".
+  Si una tarea las requiere, PARA y pregunta.
+- NUNCA despliegues a AWS. Genera código, valida con synth/plan, y para. El deploy lo ejecuta
+  el humano.
+- NUNCA ejecutes migraciones contra bases de datos remotas.
+- NUNCA hardcodees credenciales, ARNs de cuentas reales, ni endpoints de producción.
+- NUNCA aceptes tenant_id desde un header, query param o body del cliente. Solo desde el JWT
+  verificado.
+- Si modificas spec.md o cualquier RFC/ADR ya aprobado, mantén el changelog del documento y
+  no cambies la sección Decisión.
+- Si un cambio debilita el aislamiento entre tenants o el audit log, PARA y explica el
+  tradeoff antes de implementarlo.
+- Si no puedes verificar un precio de AWS o un límite de servicio, escribe "NO VERIFICADO"
+  en lugar de estimarlo de memoria.
+- Un commit por unidad lógica. No commits de 40 archivos.
