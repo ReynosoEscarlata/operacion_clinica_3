@@ -1,7 +1,7 @@
 # ADR-016: Estrategia de retención y borrado de datos personales
 
 **Fecha:** 2026-07-29
-**Estado:** Propuesto — **PENDIENTE DE DECISIÓN HUMANA**
+**Estado:** Aceptado (2026-07-29)
 **Decisor(es):** Ricardo Reynoso
 
 ## Contexto
@@ -43,17 +43,33 @@ Postgres, ni de backups, ni de logs en CloudWatch (que ni siquiera existe todav�
 
 ## Decisión
 
-**PENDIENTE DE DECISIÓN HUMANA.**
+Elegimos la **Opción 1: retención hardcodeada por tipo de dato**. Ricardo priorizó simplicidad de
+implementación sobre la flexibilidad de configuración de la Opción 2, **aceptando explícitamente**
+que esto va en contra de la recomendación del plan maestro ("documenta tus decisiones de retención
+de modo que un cambio de plazo sea un ajuste de configuración, no un rediseño") — el trade-off se
+documenta aquí precisamente para que sea una decisión consciente, no un descuido.
+
+**Mitigación mínima acordada:** los plazos hardcodeados deben vivir como constantes nombradas en
+un único módulo (ej. `lib/retention-policy.ts` por servicio, o un módulo compartido si
+`packages/authz/` de ADR-012 sienta el precedente de librería compartida), nunca dispersos como
+números mágicos en el código de negocio — así, aunque un cambio de plazo requiera un despliegue,
+al menos es un cambio de una línea en un lugar conocido, no una búsqueda a través del código.
 
 ## Consecuencias
 
-- **Positivas:** *(pendiente)*
-- **Negativas / tradeoffs:** cualquier opción con purga activa (2 o, parcialmente, 1) debe
-  garantizar borrado en cascada verificable — incluyendo backups y logs de CloudWatch, el caso que
-  el plan maestro señala explícitamente como "el que casi todos olvidan".
-- **Cosas a monitorear:** fecha de publicación del reglamento de la LFPDPPP — este ADR debe tener
-  una fecha de revisión explícita y no quedar "aceptado para siempre" sin reconsiderar los plazos
-  una vez que exista el reglamento.
+- **Positivas:** implementación más simple y rápida — sin necesidad de construir un sistema de
+  configuración de retención por tenant/categoría antes de tener un solo tenant real.
+- **Negativas / tradeoffs:** **cuando se publique el reglamento de la LFPDPPP** (pendiente a la
+  fecha de este ADR) **o cuando una clínica pida contractualmente un plazo distinto, el cambio
+  requiere una nueva versión de código y su despliegue**, no un ajuste de configuración — esto es
+  exactamente el riesgo que el plan maestro pedía evitar. Se acepta conscientemente, mitigado por
+  la centralización de constantes descrita arriba.
+- **Cosas a monitorear:** fecha de publicación del reglamento de la LFPDPPP — este ADR **debe
+  revisarse explícitamente** en cuanto exista, y no quedar aceptado indefinidamente sin
+  reconsiderar si la Opción 2 (configurable) se vuelve necesaria en ese momento; cualquier purga
+  activa que se implemente sobre esta base debe garantizar borrado en cascada verificable —
+  incluyendo backups y logs de CloudWatch, el caso que el plan maestro señala explícitamente como
+  "el que casi todos olvidan".
 
 ## Referencias
 - `claude/PLAN-challenge-5-plataforma-para-todos.md`, Fase 5 (contexto legal LFPDPPP completo)
