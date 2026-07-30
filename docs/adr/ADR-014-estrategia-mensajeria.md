@@ -1,7 +1,7 @@
 # ADR-014: Estrategia de mensajería (SQS vs. mantener Redis/BullMQ vs. coexistencia)
 
 **Fecha:** 2026-07-29
-**Estado:** Propuesto — **PENDIENTE DE DECISIÓN HUMANA**
+**Estado:** Aceptado (2026-07-29)
 **Decisor(es):** Ricardo Reynoso
 
 ## Contexto
@@ -40,18 +40,33 @@ mantenimiento operativo propio.
 
 ## Decisión
 
-**PENDIENTE DE DECISIÓN HUMANA.**
+Elegimos la **Opción 1: migrar todo a SQS (colas) + SNS/EventBridge (pub/sub de eventos de
+dominio)**, reemplazando Redis Streams y BullMQ por completo. Ricardo priorizó explícitamente
+quitar la carga operativa de mantener Redis (parches, escalado, monitoreo propio) sobre conservar
+el trabajo ya validado en Redis Streams/BullMQ, aceptando conscientemente el costo de reescritura
+descrito abajo.
 
 ## Consecuencias
 
-- **Positivas:** *(pendiente)*
-- **Negativas / tradeoffs:** cualquier opción que mantenga Redis Streams hereda también su deuda
-  ya conocida: el gap del Outbox de Auth sin relay (`docs/backlog-deuda.md`, ítem 6) y la falta de
-  namespace de tenant en las claves (ítem 3) — ninguna de las tres opciones resuelve esto por sí
-  sola, sigue siendo trabajo de la Fase 3.
-- **Cosas a monitorear:** si se elige la Opción 1 o 3 con SQS nuevo, vigilar el orden de entrega
-  (SQS estándar no garantiza orden; SQS FIFO sí pero con throughput menor) — relevante para eventos
-  como `AppointmentStatusChanged` donde el orden de transiciones importa.
+- **Positivas:** sin servidor Redis que operar/parchar/escalar manualmente; integración nativa con
+  Lambda para los jobs de la Fase 5/8 (consistente con ADR-007); durabilidad y escalado
+  gestionados por AWS sin trabajo operativo propio.
+- **Negativas / tradeoffs:** **se descarta explícitamente trabajo ya probado en producción
+  simulada** — `event-consumer.ts` (consumer groups con `XAUTOCLAIM`/`XACK`, con su fix real ya
+  documentado en `SPEC.md` 2026-06-21) y `outbox-relay.ts` en Appointments/Doctors/Payments deben
+  reescribirse por completo para los 5 servicios, igual que las 3 colas de BullMQ
+  (`appointment-expiration`, `appointment-reminders`, `appointment-noshow`). SQS no tiene un
+  análogo directo a "varios consumer groups leyendo el mismo stream desde offsets independientes"
+  (hoy Appointments y Notifications leen el mismo stream `domain-events` cada uno con su propio
+  grupo) — el equivalente en SQS es una cola por consumidor detrás de un fan-out de SNS/
+  EventBridge, con sus propias implicaciones de duplicación de mensajes a manejar.
+- **Cosas a monitorear:** esta reescritura debe planificarse como trabajo explícito de la Fase 3
+  (no un detalle menor) — priorizar migrar primero los flujos con test de integración ya existente
+  (idempotencia de Notifications, dead-letter) para no perder cobertura de regresión en el proceso;
+  orden de entrega (SQS estándar no garantiza orden; SQS FIFO sí pero con throughput menor) es
+  relevante para `AppointmentStatusChanged`, donde el orden de transiciones importa; el gap ya
+  conocido del Outbox de Auth sin relay (`docs/backlog-deuda.md`, ítem 6) y la falta de namespace
+  de tenant (ítem 3) deben resolverse *durante* esta migración, no antes ni después por separado.
 
 ## Referencias
 - `SPEC.md`, changelog Fase 3 (bug real de `event-consumer.ts` y su fix)
