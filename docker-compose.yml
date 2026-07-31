@@ -16,6 +16,11 @@ services:
       timeout: 5s
       retries: 5
 
+  # Usado únicamente por el monolito legado (src/ en la raíz, `npm run dev`)
+  # -- ninguno de los 5 microservicios lo usa desde que Appointments (el
+  # último) migró a SQS/SNS/EventBridge Scheduler en Fase 3b (ADR-014). No se
+  # retira: el monolito sigue intacto (estrategia strangler fig, el E2E del
+  # Challenge 3 no se toca).
   redis:
     image: redis:7-alpine
     restart: unless-stopped
@@ -31,10 +36,8 @@ services:
 
   # Fase 3b (ADR-014): emula SNS/SQS/EventBridge Scheduler en local, mismo
   # principio que Postgres/Redis arriba -- se prueba contra infra real,
-  # nunca se mockea el SDK de AWS. Redis se retira de los 5 servicios
-  # progresivamente a medida que cada uno migra (ver commits de Fase 3b);
-  # queda arriba hasta que el último servicio (Appointments) deje de
-  # necesitarlo.
+  # nunca se mockea el SDK de AWS. Usado por los 5 microservicios (arriba y
+  # abajo); el monolito (redis, arriba) no lo usa.
   localstack:
     image: localstack/localstack:3
     restart: unless-stopped
