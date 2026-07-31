@@ -199,3 +199,91 @@ describe('Patients CRUD (integración con DB real, Payments mockeado)', () => {
     await failingApp.close();
   });
 });
+
+describe('Patients -- ARCO (Fase 5, plan maestro)', () => {
+  let app: FastifyInstance;
+
+  beforeAll(async () => {
+    app = await buildApp({ patients: { paymentsClient: fakePaymentsClient, doctorsClient: fakeDoctorsClient } });
+    await app.ready();
+  });
+
+  afterAll(async () => {
+    await app.close();
+    await prisma.$disconnect();
+  });
+
+  const createPatient = async (): Promise<string> => {
+    const response = await app.inject({
+      method: 'POST',
+      url: '/v1/patients',
+      payload: {
+        doctorId,
+        email: `arco-${randomUUID()}@example.com`,
+        name: 'Paciente ARCO',
+        phone: '+54 9 11 5555-1234',
+      },
+    });
+    return response.json().id;
+  };
+
+  it('GET /v1/patients/:id/arco-export devuelve el paciente, sus citas y su historial de auditoría', async () => {
+    const patientId = await createPatient();
+
+    const response = await app.inject({ method: 'GET', url: `/v1/patients/${patientId}/arco-export` });
+
+    expect(response.statusCode).toBe(200);
+    const body = response.json();
+    expect(body.patient.id).toBe(patientId);
+    expect(Array.isArray(body.patient.appointments)).toBe(true);
+    expect(Array.isArray(body.auditHistory)).toBe(true);
+    // patient.created (al crear) + patient.read (findById) quedan en el
+    // historial antes siquiera de contar el propio arco.access_requested.
+    expect(body.auditHistory.length).toBeGreaterThan(0);
+
+    await withTenantId(prisma, TEST_TENANT_ID, (tx) => tx.patient.delete({ where: { id: patientId } })).catch(
+      () => undefined,
+    );
+  });
+
+  it('devuelve 404 al exportar un paciente inexistente', async () => {
+    const response = await app.inject({ method: 'GET', url: `/v1/patients/${randomUUID()}/arco-export` });
+    expect(response.statusCode).toBe(404);
+  });
+
+  it('PATCH /v1/patients/:id/arco-opposition marca optOut y se refleja en el paciente', async () => {
+    const patientId = await createPatient();
+
+    const response = await app.inject({
+      method: 'PATCH',
+      url: `/v1/patients/${patientId}/arco-opposition`,
+      payload: { optOut: true },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().optOut).toBe(true);
+
+    const check = await app.inject({ method: 'GET', url: `/v1/patients/${patientId}` });
+    expect(check.json().optOut).toBe(true);
+
+    await withTenantId(prisma, TEST_TENANT_ID, (tx) => tx.patient.delete({ where: { id: patientId } })).catch(
+      () => undefined,
+    );
+  });
+
+  it('POST /v1/patients/:id/arco-cancellation borra al paciente y sus citas', async () => {
+    const patientId = await createPatient();
+
+    const response = await app.inject({ method: 'POST', url: `/v1/patients/${patientId}/arco-cancellation` });
+    expect(response.statusCode).toBe(200);
+    expect(response.json().status).toBe('ok');
+
+    const check = await app.inject({ method: 'GET', url: `/v1/patients/${patientId}` });
+    expect(check.statusCode).toBe(404);
+  });
+
+  it('devuelve 404 al cancelar un paciente inexistente', async () => {
+    const response = await app.inject({ method: 'POST', url: `/v1/patients/${randomUUID()}/arco-cancellation` });
+    expect(response.statusCode).toBe(404);
+  });
+});

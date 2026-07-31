@@ -15,6 +15,11 @@ const TENANT_EXEMPT_ROUTES: ReadonlyArray<{ method: string; pattern: RegExp }> =
   { method: 'POST', pattern: /^\/v1\/patients$/ },
   { method: 'GET', pattern: /^\/v1\/patients\/by-email$/ },
   { method: 'GET', pattern: /^\/v1\/patients\/[^/]+$/ },
+  // ARCO (Fase 5): público por posesión de UUID, mismo criterio que
+  // GET /v1/patients/:id de arriba.
+  { method: 'GET', pattern: /^\/v1\/patients\/[^/]+\/arco-export$/ },
+  { method: 'POST', pattern: /^\/v1\/patients\/[^/]+\/arco-cancellation$/ },
+  { method: 'PATCH', pattern: /^\/v1\/patients\/[^/]+\/arco-opposition$/ },
   { method: 'POST', pattern: /^\/v1\/appointments$/ },
   { method: 'GET', pattern: /^\/v1\/appointments\/[^/]+$/ },
   { method: 'PATCH', pattern: /^\/v1\/appointments\/[^/]+\/cancel$/ },

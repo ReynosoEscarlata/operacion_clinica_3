@@ -9,11 +9,13 @@ import { logger as defaultLogger } from '../../lib/logger.js';
 import { buildPatientController } from './patients.controller.js';
 import { buildPatientRepository, type PatientRepository } from './patients.repository.js';
 import {
+  ArcoOppositionBody,
   CreatePatientBody,
   FindPatientByEmailQuery,
   ListPatientsQuery,
   PatientIdParams,
   UpdatePatientBody,
+  type ArcoOppositionDto,
   type CreatePatientDto,
   type FindPatientByEmailQueryDto,
   type ListPatientsQueryDto,
@@ -75,5 +77,29 @@ export const registerPatientRoutes = (app: FastifyInstance, deps: PatientRoutesD
       preHandler: requirePermission('patient:list'),
     },
     controller.list,
+  );
+
+  // ARCO (Fase 5, plan maestro): derechos del titular sobre sus propios
+  // datos. Público por posesión de UUID (RFC-001), mismo modelo que
+  // GET /v1/patients/:id -- el titular no tiene cuenta, su UUID es la
+  // credencial. Un admin autenticado también puede llamarlas (el tenant
+  // ambiental ya resuelto gana, mismo criterio de seguridad que getById).
+  app.get<{ Params: PatientIdParamsDto }>(
+    '/v1/patients/:id/arco-export',
+    { schema: { params: PatientIdParams }, config: { authz: { public: true } } },
+    controller.arcoExport,
+  );
+  app.post<{ Params: PatientIdParamsDto }>(
+    '/v1/patients/:id/arco-cancellation',
+    { schema: { params: PatientIdParams }, config: { authz: { public: true } } },
+    controller.arcoCancellation,
+  );
+  app.patch<{ Params: PatientIdParamsDto; Body: ArcoOppositionDto }>(
+    '/v1/patients/:id/arco-opposition',
+    {
+      schema: { params: PatientIdParams, body: ArcoOppositionBody },
+      config: { authz: { public: true } },
+    },
+    controller.arcoOpposition,
   );
 };

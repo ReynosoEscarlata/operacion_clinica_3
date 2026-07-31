@@ -37,6 +37,11 @@ model PatientSnapshot {
   tenantId  String   @db.Uuid
   email     String
   name      String
+  // Fase 5, derecho ARCO de oposición: propagado desde Appointments (dueño
+  // de Patient) vía el payload de PatientUpdated. true bloquea el envío de
+  // recordatorios (no transaccionales) en notification.service.ts -- las
+  // transaccionales (confirmación, cancelación, pago fallido) lo ignoran.
+  optOut    Boolean  @default(false)
   updatedAt DateTime @updatedAt
 
   @@index([tenantId])

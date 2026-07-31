@@ -29,6 +29,16 @@ export interface OrphanedPatientCandidate {
   tenantId: string;
 }
 
+export interface AuditLogEntry {
+  id: string;
+  createdAt: Date;
+  actorId: string | null;
+  actorRole: string | null;
+  action: string;
+  result: string;
+  ip: string | null;
+}
+
 export interface PatientRepository {
   create: (data: CreatePatientData) => Promise<Patient>;
   findByEmail: (email: string) => Promise<Patient | null>;
@@ -42,6 +52,25 @@ export interface PatientRepository {
    * Solo id+tenantId, el caller resuelve el tenant antes de borrar.
    */
   listOrphaned: () => Promise<OrphanedPatientCandidate[]>;
+  /** ARCO -- acceso: historial de quién accedió/modificó este paciente. */
+  listAuditHistory: (patientId: string) => Promise<AuditLogEntry[]>;
+  /**
+   * ARCO -- acceso: evidencia distinta de la lectura genérica (patient.read)
+   * que ya audita findById -- esta es específicamente "el titular ejerció
+   * su derecho de acceso", no cualquier lectura de staff.
+   */
+  recordArcoAccess: (patientId: string) => Promise<void>;
+  /**
+   * ARCO -- cancelación: borra las citas del paciente (cascade a sus
+   * AppointmentEvent) y al paciente mismo, bajo demanda (no espera al
+   * corte de retención de ADR-016). Registra la evidencia de la solicitud
+   * ANTES de borrar, en la misma transacción -- si el insert del audit log
+   * falla, la cancelación falla y no se pierde el registro de que se pidió.
+   * Devuelve false si el paciente no existe (404 para el caller).
+   */
+  requestCancellation: (patientId: string) => Promise<boolean>;
+  /** ARCO -- oposición: bloquea comunicaciones no transaccionales. */
+  setOptOut: (patientId: string, optOut: boolean) => Promise<Patient | null>;
 }
 
 // Patient es dato privado por tenant (a diferencia del directorio de
@@ -71,6 +100,7 @@ export class PrismaPatientRepository implements PatientRepository {
         patientId: patient.id,
         email: patient.email,
         name: patient.name,
+        optOut: patient.optOut,
       });
       await writeAuditLog(tx, 'patient.created', 'patient', patient.id, 'success');
 
@@ -116,6 +146,7 @@ export class PrismaPatientRepository implements PatientRepository {
         patientId: patient.id,
         email: patient.email,
         name: patient.name,
+        optOut: patient.optOut,
       });
       await writeAuditLog(tx, 'patient.updated', 'patient', patient.id, 'success');
 
@@ -141,6 +172,71 @@ export class PrismaPatientRepository implements PatientRepository {
     return this.prisma.$queryRaw<OrphanedPatientCandidate[]>`
       SELECT id, "tenantId" FROM list_orphaned_patients()
     `;
+  }
+
+  async listAuditHistory(patientId: string): Promise<AuditLogEntry[]> {
+    return withTenant(this.prisma, (tx) =>
+      tx.auditLog.findMany({
+        where: { resourceType: 'patient', resourceId: patientId },
+        orderBy: { createdAt: 'desc' },
+        select: { id: true, createdAt: true, actorId: true, actorRole: true, action: true, result: true, ip: true },
+      }),
+    );
+  }
+
+  async recordArcoAccess(patientId: string): Promise<void> {
+    await withTenant(this.prisma, (tx) => writeAuditLog(tx, 'arco.access_requested', 'patient', patientId, 'success'));
+  }
+
+  async requestCancellation(patientId: string): Promise<boolean> {
+    return withTenant(this.prisma, async (tx) => {
+      const existing = await tx.patient.findUnique({ where: { id: patientId } });
+      if (!existing) {
+        return false;
+      }
+
+      await writeAuditLog(
+        tx,
+        'arco.cancellation_requested',
+        'patient',
+        patientId,
+        'success',
+        'Solicitud de cancelación ARCO por el titular',
+      );
+
+      await tx.appointment.deleteMany({ where: { patientId } });
+      await tx.patient.delete({ where: { id: patientId } });
+
+      return true;
+    });
+  }
+
+  async setOptOut(patientId: string, optOut: boolean): Promise<Patient | null> {
+    return withTenant(this.prisma, async (tx) => {
+      const existing = await tx.patient.findUnique({ where: { id: patientId } });
+      if (!existing) {
+        return null;
+      }
+
+      const patient = await tx.patient.update({ where: { id: patientId }, data: { optOut } });
+
+      await writeOutboxEvent(tx, 'PatientUpdated', {
+        patientId: patient.id,
+        email: patient.email,
+        name: patient.name,
+        optOut: patient.optOut,
+      });
+      await writeAuditLog(
+        tx,
+        'arco.opposition_requested',
+        'patient',
+        patientId,
+        'success',
+        optOut ? 'opt-out' : 'opt-in',
+      );
+
+      return patient;
+    });
   }
 }
 

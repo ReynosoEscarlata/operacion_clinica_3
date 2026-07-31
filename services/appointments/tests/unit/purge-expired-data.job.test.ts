@@ -50,6 +50,10 @@ const buildFakePatientRepository = (
       deletedIds.push(id);
     },
     listOrphaned: async () => candidates,
+    listAuditHistory: async () => [],
+    recordArcoAccess: async () => {},
+    requestCancellation: async () => true,
+    setOptOut: async () => null,
   };
 };
 

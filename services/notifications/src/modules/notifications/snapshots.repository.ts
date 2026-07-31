@@ -16,6 +16,7 @@ export interface UpsertPatientData {
   id: string;
   email: string;
   name: string;
+  optOut?: boolean;
 }
 
 export interface UpsertDoctorData {

@@ -50,6 +50,11 @@ model Patient {
   name             String
   phone            String
   stripeCustomerId String?
+  // Fase 5, derecho ARCO de oposición: true bloquea el envío de
+  // comunicaciones no transaccionales (recordatorios) -- las transaccionales
+  // (confirmación, cancelación, pago fallido) siguen enviándose, son parte
+  // del servicio ya contratado, no marketing.
+  optOut           Boolean  @default(false)
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 

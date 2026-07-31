@@ -37,3 +37,9 @@ export const FindPatientByEmailQuery = Type.Object({
   email: Type.String({ format: 'email' }),
 });
 export type FindPatientByEmailQueryDto = Static<typeof FindPatientByEmailQuery>;
+
+// ARCO -- Oposición (Fase 5, plan maestro).
+export const ArcoOppositionBody = Type.Object({
+  optOut: Type.Boolean(),
+});
+export type ArcoOppositionDto = Static<typeof ArcoOppositionBody>;

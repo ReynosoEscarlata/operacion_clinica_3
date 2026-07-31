@@ -130,6 +130,37 @@ describe('Aislamiento cross-tenant: Patients/Appointments/Admin', () => {
       expect(response.statusCode).toBe(404);
     });
 
+    it('GET /v1/patients/:id/arco-export con header de OTRO tenant devuelve 404', async () => {
+      const response = await app.inject({
+        method: 'GET',
+        url: `/v1/patients/${patientA}/arco-export`,
+        headers: headersFor(TENANT_B),
+      });
+      expect(response.statusCode).toBe(404);
+    });
+
+    it('PATCH /v1/patients/:id/arco-opposition con header de OTRO tenant devuelve 404', async () => {
+      const response = await app.inject({
+        method: 'PATCH',
+        url: `/v1/patients/${patientA}/arco-opposition`,
+        headers: headersFor(TENANT_B),
+        payload: { optOut: true },
+      });
+      expect(response.statusCode).toBe(404);
+    });
+
+    it('POST /v1/patients/:id/arco-cancellation con header de OTRO tenant devuelve 404 y no borra nada', async () => {
+      const response = await app.inject({
+        method: 'POST',
+        url: `/v1/patients/${patientA}/arco-cancellation`,
+        headers: headersFor(TENANT_B),
+      });
+      expect(response.statusCode).toBe(404);
+
+      const stillThere = await app.inject({ method: 'GET', url: `/v1/patients/${patientA}` });
+      expect(stillThere.statusCode).toBe(200);
+    });
+
     it('GET /v1/patients/by-email con el doctorId de OTRO tenant nunca encuentra el paciente', async () => {
       const response = await app.inject({
         method: 'GET',

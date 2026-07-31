@@ -26,6 +26,7 @@ const buildPatient = (overrides: Partial<PatientSnapshot> = {}): PatientSnapshot
   tenantId: TENANT_ID,
   email: 'patient@example.com',
   name: 'Paciente Test',
+  optOut: false,
   updatedAt: new Date(),
   ...overrides,
 });
@@ -212,5 +213,106 @@ describe('NotificationService', () => {
     await service.handlePatientUpdated({ patientId: 'patient-1', email: 'a@a.com', name: 'A' });
 
     expect(snapshots.upsertPatient).toHaveBeenCalledWith({ id: 'patient-1', email: 'a@a.com', name: 'A' });
+  });
+
+  it('PatientUpdated: propaga optOut cuando el evento lo incluye (Fase 5, ARCO oposición)', async () => {
+    const snapshots: SnapshotsRepository = {
+      upsertAppointment: vi.fn(),
+      updateAppointmentStatus: vi.fn(),
+      getAppointment: vi.fn(),
+      upsertPatient: vi.fn().mockResolvedValue(buildPatient({ optOut: true })),
+      getPatient: vi.fn(),
+      upsertDoctor: vi.fn(),
+      getDoctor: vi.fn(),
+    };
+    const channel: NotificationChannel = { name: 'email', send: vi.fn() };
+    const logs: NotificationLogRepository = { record: vi.fn(), wasAlreadySent: vi.fn().mockResolvedValue(false) };
+    const service = buildNotificationService({ snapshots, channel, logs, logger });
+
+    await service.handlePatientUpdated({ patientId: 'patient-1', email: 'a@a.com', name: 'A', optOut: true });
+
+    expect(snapshots.upsertPatient).toHaveBeenCalledWith({
+      id: 'patient-1',
+      email: 'a@a.com',
+      name: 'A',
+      optOut: true,
+    });
+  });
+
+  it('AppointmentStatusChanged a REMINDED: envía el recordatorio si el paciente no está opt-out', async () => {
+    const snapshots: SnapshotsRepository = {
+      upsertAppointment: vi.fn(),
+      updateAppointmentStatus: vi.fn().mockResolvedValue(buildAppointment({ status: 'REMINDED' })),
+      getAppointment: vi.fn(),
+      upsertPatient: vi.fn(),
+      getPatient: vi.fn().mockResolvedValue(buildPatient({ optOut: false })),
+      upsertDoctor: vi.fn(),
+      getDoctor: vi.fn(),
+    };
+    const channel: NotificationChannel = { name: 'email', send: vi.fn().mockResolvedValue(undefined) };
+    const logs: NotificationLogRepository = { record: vi.fn(), wasAlreadySent: vi.fn().mockResolvedValue(false) };
+    const service = buildNotificationService({ snapshots, channel, logs, logger });
+
+    await service.handleAppointmentStatusChanged({
+      appointmentId: 'apt-1',
+      from: 'PAID',
+      to: 'REMINDED',
+      trigger: 'reminder-cron',
+    });
+
+    expect(channel.send).toHaveBeenCalledWith(
+      expect.objectContaining({ subject: expect.stringContaining('Recordatorio') }),
+    );
+    expect(logs.record).toHaveBeenCalledWith('apt-1', 'email', 'reminder', 'SENT');
+  });
+
+  it('AppointmentStatusChanged a REMINDED: NO envía nada si el paciente ejerció oposición (ARCO)', async () => {
+    const snapshots: SnapshotsRepository = {
+      upsertAppointment: vi.fn(),
+      updateAppointmentStatus: vi.fn().mockResolvedValue(buildAppointment({ status: 'REMINDED' })),
+      getAppointment: vi.fn(),
+      upsertPatient: vi.fn(),
+      getPatient: vi.fn().mockResolvedValue(buildPatient({ optOut: true })),
+      upsertDoctor: vi.fn(),
+      getDoctor: vi.fn(),
+    };
+    const channel: NotificationChannel = { name: 'email', send: vi.fn().mockResolvedValue(undefined) };
+    const logs: NotificationLogRepository = { record: vi.fn(), wasAlreadySent: vi.fn().mockResolvedValue(false) };
+    const service = buildNotificationService({ snapshots, channel, logs, logger });
+
+    await service.handleAppointmentStatusChanged({
+      appointmentId: 'apt-1',
+      from: 'PAID',
+      to: 'REMINDED',
+      trigger: 'reminder-cron',
+    });
+
+    expect(channel.send).not.toHaveBeenCalled();
+    expect(logs.record).not.toHaveBeenCalled();
+  });
+
+  it('AppointmentStatusChanged a PAID: SÍ envía aunque el paciente esté opt-out (transaccional, no marketing)', async () => {
+    const snapshots: SnapshotsRepository = {
+      upsertAppointment: vi.fn(),
+      updateAppointmentStatus: vi.fn().mockResolvedValue(buildAppointment({ status: 'PAID' })),
+      getAppointment: vi.fn(),
+      upsertPatient: vi.fn(),
+      getPatient: vi.fn().mockResolvedValue(buildPatient({ optOut: true })),
+      upsertDoctor: vi.fn(),
+      getDoctor: vi.fn(),
+    };
+    const channel: NotificationChannel = { name: 'email', send: vi.fn().mockResolvedValue(undefined) };
+    const logs: NotificationLogRepository = { record: vi.fn(), wasAlreadySent: vi.fn().mockResolvedValue(false) };
+    const service = buildNotificationService({ snapshots, channel, logs, logger });
+
+    await service.handleAppointmentStatusChanged({
+      appointmentId: 'apt-1',
+      from: 'CONFIRMED',
+      to: 'PAID',
+      trigger: 'webhook',
+    });
+
+    expect(channel.send).toHaveBeenCalled();
+    expect(logs.record).toHaveBeenCalledWith('apt-1', 'email', 'confirmation', 'SENT');
   });
 });

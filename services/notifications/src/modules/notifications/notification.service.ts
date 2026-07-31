@@ -30,6 +30,7 @@ export interface PatientUpdatedPayload {
   patientId: string;
   email: string;
   name: string;
+  optOut?: boolean;
 }
 
 export interface DoctorEventPayload {
@@ -92,7 +93,12 @@ export class NotificationService {
   }
 
   async handlePatientUpdated(payload: PatientUpdatedPayload): Promise<void> {
-    await this.snapshots.upsertPatient({ id: payload.patientId, email: payload.email, name: payload.name });
+    await this.snapshots.upsertPatient({
+      id: payload.patientId,
+      email: payload.email,
+      name: payload.name,
+      ...(payload.optOut !== undefined ? { optOut: payload.optOut } : {}),
+    });
   }
 
   async handleDoctorEvent(payload: DoctorEventPayload): Promise<void> {
@@ -118,6 +124,17 @@ export class NotificationService {
     const patient = await this.snapshots.getPatient(appointment.patientId);
     if (!patient) {
       throw new Error(`PatientSnapshot no encontrado para ${appointment.patientId}`);
+    }
+
+    // Fase 5, derecho ARCO de oposición: solo bloquea 'reminder' (no
+    // transaccional) -- confirmation/payment-failed son parte del servicio
+    // ya contratado, no marketing, y siguen enviándose aunque optOut=true.
+    if (type === 'reminder' && patient.optOut) {
+      this.logger.info(
+        { appointmentId: appointment.id, patientId: patient.id },
+        'Recordatorio omitido: el paciente ejerció su derecho de oposición (ARCO)',
+      );
+      return;
     }
 
     const dateTime = appointment.dateTime.toLocaleString('es-MX');

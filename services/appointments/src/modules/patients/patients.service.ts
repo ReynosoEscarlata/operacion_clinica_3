@@ -12,7 +12,7 @@ import type {
   ListPatientsQueryDto,
   UpdatePatientDto,
 } from './patients.schemas.js';
-import type { PatientRepository, PatientWithAppointments } from './patients.repository.js';
+import type { AuditLogEntry, PatientRepository, PatientWithAppointments } from './patients.repository.js';
 
 export interface ListPatientsResult {
   items: Patient[];
@@ -124,6 +124,83 @@ export class PatientService {
       throw new AppError(404, 'PATIENT_NOT_FOUND', 'Paciente no encontrado');
     }
     return patient;
+  }
+
+  // ARCO -- Acceso (plan maestro Fase 5). Mismo mecanismo de resolución de
+  // tenant que getById (posesión de UUID o admin autenticado): el titular
+  // de los datos no tiene cuenta (RFC-001), su UUID es la credencial.
+  async getArcoExport(
+    id: string,
+  ): Promise<{ patient: PatientWithAppointments; auditHistory: AuditLogEntry[] }> {
+    const ambientTenantId = getTenantId();
+
+    const build = async (): Promise<{ patient: PatientWithAppointments; auditHistory: AuditLogEntry[] }> => {
+      const patient = await this.repository.findById(id);
+      if (!patient) {
+        throw new AppError(404, 'PATIENT_NOT_FOUND', 'Paciente no encontrado');
+      }
+      const auditHistory = await this.repository.listAuditHistory(id);
+      await this.repository.recordArcoAccess(id);
+      return { patient, auditHistory };
+    };
+
+    if (ambientTenantId) {
+      return build();
+    }
+
+    const tenantId = await resolveTenantForPatient(defaultPrisma, id);
+    if (!tenantId) {
+      throw new AppError(404, 'PATIENT_NOT_FOUND', 'Paciente no encontrado');
+    }
+    return runWithTenant(tenantId, build);
+  }
+
+  // ARCO -- Cancelación: borrado bajo demanda, no espera al corte de
+  // retención de ADR-016.
+  async requestCancellation(id: string): Promise<void> {
+    const ambientTenantId = getTenantId();
+
+    const run = async (): Promise<void> => {
+      const deleted = await this.repository.requestCancellation(id);
+      if (!deleted) {
+        throw new AppError(404, 'PATIENT_NOT_FOUND', 'Paciente no encontrado');
+      }
+    };
+
+    if (ambientTenantId) {
+      return run();
+    }
+
+    const tenantId = await resolveTenantForPatient(defaultPrisma, id);
+    if (!tenantId) {
+      throw new AppError(404, 'PATIENT_NOT_FOUND', 'Paciente no encontrado');
+    }
+    return runWithTenant(tenantId, run);
+  }
+
+  // ARCO -- Oposición: bloquea comunicaciones no transaccionales
+  // (recordatorios) -- las transaccionales (confirmación, cancelación,
+  // pago fallido) siguen enviándose, son parte del servicio ya contratado.
+  async setOptOut(id: string, optOut: boolean): Promise<Patient> {
+    const ambientTenantId = getTenantId();
+
+    const run = async (): Promise<Patient> => {
+      const patient = await this.repository.setOptOut(id, optOut);
+      if (!patient) {
+        throw new AppError(404, 'PATIENT_NOT_FOUND', 'Paciente no encontrado');
+      }
+      return patient;
+    };
+
+    if (ambientTenantId) {
+      return run();
+    }
+
+    const tenantId = await resolveTenantForPatient(defaultPrisma, id);
+    if (!tenantId) {
+      throw new AppError(404, 'PATIENT_NOT_FOUND', 'Paciente no encontrado');
+    }
+    return runWithTenant(tenantId, run);
   }
 
   async list(query: ListPatientsQueryDto): Promise<ListPatientsResult> {

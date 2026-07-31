@@ -1,6 +1,7 @@
 import type { FastifyReply, FastifyRequest } from 'fastify';
 
 import type {
+  ArcoOppositionDto,
   CreatePatientDto,
   FindPatientByEmailQueryDto,
   ListPatientsQueryDto,
@@ -50,6 +51,30 @@ export class PatientController {
   ): Promise<void> => {
     const result = await this.service.list(request.query);
     reply.send({ data: result.items, nextCursor: result.nextCursor });
+  };
+
+  arcoExport = async (
+    request: FastifyRequest<{ Params: PatientIdParamsDto }>,
+    reply: FastifyReply,
+  ): Promise<void> => {
+    const result = await this.service.getArcoExport(request.params.id);
+    reply.send(result);
+  };
+
+  arcoCancellation = async (
+    request: FastifyRequest<{ Params: PatientIdParamsDto }>,
+    reply: FastifyReply,
+  ): Promise<void> => {
+    await this.service.requestCancellation(request.params.id);
+    reply.status(200).send({ status: 'ok' });
+  };
+
+  arcoOpposition = async (
+    request: FastifyRequest<{ Params: PatientIdParamsDto; Body: ArcoOppositionDto }>,
+    reply: FastifyReply,
+  ): Promise<void> => {
+    const patient = await this.service.setOptOut(request.params.id, request.body.optOut);
+    reply.send(patient);
   };
 }
 
