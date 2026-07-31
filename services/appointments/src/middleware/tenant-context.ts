@@ -23,6 +23,15 @@ const TENANT_EXEMPT_ROUTES: ReadonlyArray<{ method: string; pattern: RegExp }> =
   { method: 'POST', pattern: /^\/v1\/appointments$/ },
   { method: 'GET', pattern: /^\/v1\/appointments\/[^/]+$/ },
   { method: 'PATCH', pattern: /^\/v1\/appointments\/[^/]+\/cancel$/ },
+  // Plano de plataforma (Fase 6, ADR-017): un actor platform_admin/
+  // platform_support tiene tenantId: null (RFC-003/RFC-004) -- el gateway
+  // no reenvía el header de tenant para ese caso, así que estas rutas
+  // entran con tenantId: null en vez de 401. La seguridad real la da
+  // requirePermission('platform_dashboard:read') en las rutas mismas, no
+  // este middleware -- este solo evita bloquear con un 401 equivocado a
+  // alguien que nunca tuvo tenant que enviar.
+  { method: 'GET', pattern: /^\/v1\/platform\/dashboard$/ },
+  { method: 'GET', pattern: /^\/v1\/platform\/metrics$/ },
 ];
 
 const isTenantExempt = (method: string, url: string): boolean => {

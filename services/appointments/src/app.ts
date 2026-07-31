@@ -16,6 +16,7 @@ import { getTenantId } from './lib/tenant-context.js';
 import { registerAdminRoutes, type AdminRoutesDeps } from './modules/admin/index.js';
 import { registerAppointmentRoutes, type AppointmentRoutesDeps } from './modules/appointments/index.js';
 import { registerPatientRoutes, type PatientRoutesDeps } from './modules/patients/index.js';
+import { registerPlatformRoutes, type PlatformRoutesDeps } from './modules/platform/index.js';
 import { registerHealthRoute } from './routes/health.js';
 import { registerMetricsRoute } from './routes/metrics.js';
 
@@ -24,6 +25,7 @@ export interface BuildAppDeps {
   appointments?: AppointmentRoutesDeps;
   patients?: PatientRoutesDeps;
   admin?: AdminRoutesDeps;
+  platform?: PlatformRoutesDeps;
 }
 
 export const buildApp = async (deps: BuildAppDeps = {}): Promise<FastifyInstance> => {
@@ -56,6 +58,7 @@ export const buildApp = async (deps: BuildAppDeps = {}): Promise<FastifyInstance
   registerPatientRoutes(app, deps.patients);
   registerAppointmentRoutes(app, deps.appointments);
   registerAdminRoutes(app, deps.admin);
+  registerPlatformRoutes(app, deps.platform);
 
   return app;
 };

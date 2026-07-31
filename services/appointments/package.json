@@ -20,6 +20,7 @@
     "schema": "prisma/schema.prisma"
   },
   "dependencies": {
+    "@aws-sdk/client-cloudwatch": "^3.687.0",
     "@aws-sdk/client-scheduler": "^3.687.0",
     "@aws-sdk/client-sns": "^3.687.0",
     "@aws-sdk/client-sqs": "^3.687.0",

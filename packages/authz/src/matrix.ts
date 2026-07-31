@@ -281,4 +281,13 @@ export const PERMISSION_MATRIX = {
     receptionist: 'none',
     patient: 'none',
   },
+  'platform_dashboard:read': {
+    platform_admin: 'all',
+    platform_support: 'all',
+    clinic_owner: 'none',
+    clinic_admin: 'none',
+    doctor: 'none',
+    receptionist: 'none',
+    patient: 'none',
+  },
 } satisfies PermissionMatrix;

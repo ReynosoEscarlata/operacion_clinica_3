@@ -34,6 +34,8 @@ const COVERED = new Set([
   'GET /v1/admin/dead-letter',
   'POST /v1/admin/dead-letter/:id/retry',
   'DELETE /v1/admin/dead-letter/:id',
+  'GET /v1/platform/dashboard',
+  'GET /v1/platform/metrics',
 ]);
 
 // (?:<[^>]*>)? -- ver el mismo comentario en

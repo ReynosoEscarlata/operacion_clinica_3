@@ -30,6 +30,10 @@ export const PERMISSIONS = [
   'payment:create_intent',
   'payment:cancel_intent',
   'payment:refund',
+  // Fase 6 (ADR-017): GET /v1/platform/dashboard, /v1/platform/metrics
+  // (Appointments) y /v1/platform-users/active (Auth) -- exclusivo del
+  // plano de plataforma (RFC-004), nunca un rol de tenant.
+  'platform_dashboard:read',
 ] as const;
 
 export type Permission = (typeof PERMISSIONS)[number];

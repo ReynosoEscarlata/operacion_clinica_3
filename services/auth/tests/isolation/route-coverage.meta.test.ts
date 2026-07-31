@@ -29,6 +29,7 @@ const COVERED = new Set([
   'PATCH /v1/users/:id/deactivate',
   // RFC-004, escalada de platform_support -- ver tests/integration/support-access.test.ts.
   'POST /v1/auth/support-access',
+  'GET /v1/platform-users/active',
 ]);
 
 // (?:<[^>]*>)? -- Fase 4: app.post<{ Body: X }>('/ruta', ...) es el patrón

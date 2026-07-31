@@ -96,4 +96,27 @@ describe('Aislamiento cross-tenant: Users', () => {
     expect(rows.every((row) => row.tenantId === TENANT_A)).toBe(true);
     expect(rows.some((row) => row.id === userInB)).toBe(false);
   });
+
+  // Fase 6 (ADR-017): agregado cross-tenant por diseño -- el "aislamiento"
+  // que importa acá es que un rol de tenant nunca lo alcance.
+  describe('Platform (dashboard ejecutivo, ADR-017)', () => {
+    it('GET /v1/platform-users/active con un actor de plataforma (sin header de tenant) responde 200', async () => {
+      const response = await app.inject({
+        method: 'GET',
+        url: '/v1/platform-users/active',
+        headers: { 'x-internal-user-role': 'platform_admin' },
+      });
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toHaveProperty('activeByRole');
+    });
+
+    it('GET /v1/platform-users/active con un rol de tenant (clinic_owner) responde 403', async () => {
+      const response = await app.inject({
+        method: 'GET',
+        url: '/v1/platform-users/active',
+        headers: headersFor(TENANT_A),
+      });
+      expect(response.statusCode).toBe(403);
+    });
+  });
 });

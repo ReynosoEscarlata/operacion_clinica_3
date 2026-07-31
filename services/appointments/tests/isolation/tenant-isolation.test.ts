@@ -307,6 +307,41 @@ describe('Aislamiento cross-tenant: Patients/Appointments/Admin', () => {
     });
   });
 
+  // Fase 6 (ADR-017): a diferencia del resto de esta suite (aislamiento
+  // ENTRE tenants), estas rutas son agregados CROSS-TENANT por diseño --
+  // el "aislamiento" que importa acá es que un rol de tenant nunca las
+  // alcance, sin importar qué tenant diga tener.
+  describe('Platform (dashboard ejecutivo, ADR-017)', () => {
+    it('GET /v1/platform/dashboard con un actor de plataforma (sin header de tenant) responde 200', async () => {
+      const response = await app.inject({
+        method: 'GET',
+        url: '/v1/platform/dashboard',
+        headers: { 'x-internal-user-role': 'platform_admin' },
+      });
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toHaveProperty('appointmentsToday');
+      expect(response.json()).toHaveProperty('revenue');
+    });
+
+    it('GET /v1/platform/dashboard con un rol de tenant (clinic_owner) responde 403, nunca datos agregados', async () => {
+      const response = await app.inject({
+        method: 'GET',
+        url: '/v1/platform/dashboard',
+        headers: { 'x-internal-tenant-id': TENANT_A, 'x-internal-user-role': 'clinic_owner' },
+      });
+      expect(response.statusCode).toBe(403);
+    });
+
+    it('GET /v1/platform/metrics con un rol de tenant (doctor) responde 403', async () => {
+      const response = await app.inject({
+        method: 'GET',
+        url: '/v1/platform/metrics',
+        headers: { 'x-internal-tenant-id': TENANT_A, 'x-internal-user-role': 'doctor' },
+      });
+      expect(response.statusCode).toBe(403);
+    });
+  });
+
   describe('Base de datos', () => {
     it('sin app.current_tenant seteado, app_role no ve ninguna fila de "Patient" ni "Appointment"', async () => {
       const patientRows = await prisma.$queryRaw<Array<{ count: bigint }>>`SELECT count(*) FROM "Patient"`;

@@ -17,6 +17,9 @@ const TENANT_EXEMPT_ROUTES: ReadonlyArray<{ method: string; pattern: RegExp }> =
   { method: 'POST', pattern: /^\/v1\/auth\/refresh$/ },
   { method: 'GET', pattern: /^\/v1\/auth\/\.well-known\/jwks\.json$/ },
   { method: 'POST', pattern: /^\/v1\/auth\/support-access$/ },
+  // Plano de plataforma (Fase 6, ADR-017): mismo criterio que support-access
+  // -- un actor platform_admin/platform_support no tiene tenant que enviar.
+  { method: 'GET', pattern: /^\/v1\/platform-users\/active$/ },
 ];
 
 const isTenantExempt = (method: string, url: string): boolean => {

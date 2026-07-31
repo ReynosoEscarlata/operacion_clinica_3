@@ -112,6 +112,42 @@ export interface DashboardStats {
   }>;
 }
 
+// Fase 6 (ADR-017): dashboard ejecutivo -- agregados CROSS-TENANT (no un
+// DashboardStats por tenant como el de arriba). byStatus es Record<string,
+// number> (no Record<AppointmentStatus, number>): la función SECURITY
+// DEFINER que lo produce (platform_status_counts) solo devuelve las claves
+// de estado que efectivamente tienen citas, nunca las 8 completas.
+export interface PlatformDashboardStats {
+  appointmentsToday: number;
+  appointmentsThisWeek: number;
+  byStatus: Record<string, number>;
+  revenue: { today: number; thisWeek: number; thisMonth: number };
+}
+
+export interface PlatformPerServiceMetrics {
+  requestCount: number;
+  errorCount: number;
+  latencyP95Ms: number;
+}
+
+export interface PlatformMetricsData {
+  aggregate: {
+    requestCount: number;
+    errorCount: number;
+    errorRatePercent: number;
+    latencyP95MaxMs: number;
+  };
+  perService: Record<string, PlatformPerServiceMetrics>;
+}
+
+export type PlatformMetricsResult =
+  | { available: true; data: PlatformMetricsData }
+  | { available: false; reason: string };
+
+export interface PlatformActiveUsers {
+  activeByRole: Record<string, number>;
+}
+
 export interface RecentEvent {
   id: string;
   appointmentId: string;

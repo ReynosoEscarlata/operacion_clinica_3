@@ -67,6 +67,14 @@ const ROUTES: ReadonlyArray<{ prefix: string; upstream: string }> = [
   { prefix: '/v1/patients', upstream: env.APPOINTMENTS_SERVICE_URL },
   { prefix: '/v1/appointments', upstream: env.APPOINTMENTS_SERVICE_URL },
   { prefix: '/v1/admin', upstream: env.APPOINTMENTS_SERVICE_URL },
+  // Fase 6 (ADR-017): prefijo deliberadamente disjunto de /v1/admin
+  // (RFC-004, dos planos de autorización distintos) -- /v1/platform-users
+  // NO colisiona con /v1/platform pese a compartir el texto "platform":
+  // @fastify/http-proxy registra el prefijo vía el mecanismo de Fastify
+  // (find-my-way, por segmento de ruta), no por substring, así que
+  // "platform-users" y "platform" son segmentos distintos para el router.
+  { prefix: '/v1/platform', upstream: env.APPOINTMENTS_SERVICE_URL },
+  { prefix: '/v1/platform-users', upstream: env.AUTH_SERVICE_URL },
   { prefix: '/v1/doctors', upstream: env.DOCTORS_SERVICE_URL },
   { prefix: '/v1/payment-intents', upstream: env.PAYMENTS_SERVICE_URL },
   { prefix: '/v1/refunds', upstream: env.PAYMENTS_SERVICE_URL },

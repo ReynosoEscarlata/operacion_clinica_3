@@ -14,6 +14,7 @@ import { registerTenantContext } from './middleware/tenant-context.js';
 import { getRequestId, setTraceId } from './lib/request-context.js';
 import { getTenantId } from './lib/tenant-context.js';
 import { registerAuthRoutes, type AuthRoutesDeps } from './modules/auth/index.js';
+import { registerPlatformUsersRoutes, type PlatformUsersRoutesDeps } from './modules/platform-users/index.js';
 import { registerUsersRoutes, type UsersRoutesDeps } from './modules/users/index.js';
 import { registerHealthRoute } from './routes/health.js';
 import { registerMetricsRoute } from './routes/metrics.js';
@@ -22,6 +23,7 @@ export interface BuildAppDeps {
   prisma?: PrismaClient;
   auth?: AuthRoutesDeps;
   users?: UsersRoutesDeps;
+  platformUsers?: PlatformUsersRoutesDeps;
 }
 
 export const buildApp = async (deps: BuildAppDeps = {}): Promise<FastifyInstance> => {
@@ -53,6 +55,7 @@ export const buildApp = async (deps: BuildAppDeps = {}): Promise<FastifyInstance
 
   registerAuthRoutes(app, deps.auth);
   registerUsersRoutes(app, deps.users);
+  registerPlatformUsersRoutes(app, deps.platformUsers);
 
   return app;
 };

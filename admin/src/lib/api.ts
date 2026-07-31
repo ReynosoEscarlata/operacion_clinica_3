@@ -8,6 +8,9 @@ import type {
   DeadLetterSource,
   Doctor,
   ListAppointmentsResult,
+  PlatformActiveUsers,
+  PlatformDashboardStats,
+  PlatformMetricsResult,
   RecentEvent,
 } from './types';
 
@@ -101,6 +104,18 @@ export const fetchDashboard = (accessToken: string): Promise<DashboardStats> =>
 
 export const fetchRecentEvents = (accessToken: string, hours = 24): Promise<RecentEvent[]> =>
   apiRequest<RecentEvent[]>(accessToken, `/v1/admin/events?hours=${hours}`);
+
+// Dashboard ejecutivo (Fase 6, ADR-017): fan-out a dos servicios, mismo
+// patrón que fetchDeadLetterJobs -- "usuarios activos" vive en Auth
+// (RFC-001, cero estado compartido), el resto en Appointments.
+export const fetchPlatformDashboard = (accessToken: string): Promise<PlatformDashboardStats> =>
+  apiRequest<PlatformDashboardStats>(accessToken, '/v1/platform/dashboard');
+
+export const fetchPlatformMetrics = (accessToken: string): Promise<PlatformMetricsResult> =>
+  apiRequest<PlatformMetricsResult>(accessToken, '/v1/platform/metrics');
+
+export const fetchPlatformActiveUsers = (accessToken: string): Promise<PlatformActiveUsers> =>
+  apiRequest<PlatformActiveUsers>(accessToken, '/v1/platform-users/active');
 
 // Dead-letter NO tiene agregador (RFC-002): Appointments y Notifications
 // tienen cada uno su propia tabla, el panel pega a los dos por separado y

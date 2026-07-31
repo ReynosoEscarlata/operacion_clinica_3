@@ -88,6 +88,9 @@ sección 1). Convención `recurso:acción`.
 | `POST /v1/payment-intents/:id/cancel` | payments | `payment:cancel_intent` | Protegida (interna) |
 | `POST /v1/refunds` | payments | `payment:refund` | Protegida (admin, según `docs/architecture/C4-nivel2-contenedores.md`) |
 | `POST /v1/webhooks/stripe` | payments | — (no es un permiso de usuario; autenticado por firma de Stripe, no por JWT) | Pública (firma verificada) |
+| `GET /v1/platform/dashboard` | appointments | `platform_dashboard:read` (Fase 6, ADR-017) | Protegida, solo plano de plataforma |
+| `GET /v1/platform/metrics` | appointments | `platform_dashboard:read` (Fase 6, ADR-017) | Protegida, solo plano de plataforma |
+| `GET /v1/platform-users/active` | auth | `platform_dashboard:read` (Fase 6, ADR-017) | Protegida, solo plano de plataforma |
 
 **Gap detectado, no un permiso de este sistema todavía:** el ejemplo del plan maestro
 (`patient:read_medical_history`) no tiene equivalente real — el sistema no almacena historial
@@ -134,6 +137,7 @@ aplica.
 | `dead_letter:read/retry/remove` | ✓ | ✓ (justificado) | — | — | — | — | — |
 | `payment:create_customer/create_intent/cancel_intent` | ✓ | — | — | — | — | — | — (llamada interna, no expuesta) |
 | `payment:refund` | ✓ | — | ✓ | — | — | — | — |
+| `platform_dashboard:read` | ✓ | ✓ | — | — | — | — | — |
 
 **Decisiones que resolvieron celdas específicas (2026-07-29):**
 - `doctor:cancel` (dentro de `appointment:cancel`): el doctor **sí** puede cancelar sus propias
@@ -220,3 +224,11 @@ las decisiones anotadas debajo de ella). Resumen de lo decidido:
 
 Sin preguntas pendientes para pasar a la Fase 4 (implementación del motor de permisos,
 `packages/authz/`, ADR-012).
+
+## Changelog
+
+- **2026-07-31 (Fase 6, ADR-017):** agregado el permiso `platform_dashboard:read` (catálogo y
+  matriz), exclusivo del plano de plataforma (`platform_admin`/`platform_support`, `none` para
+  los 5 roles de tenant) — cubre `GET /v1/platform/dashboard` y `GET /v1/platform/metrics`
+  (Appointments) y `GET /v1/platform-users/active` (Auth), el backend del dashboard ejecutivo. No
+  se modificó ninguna celda ni decisión existente de la matriz original.

@@ -5,6 +5,7 @@ import { ToastProvider } from './context/ToastContext';
 import { AdminKeyGate } from './components/AdminKeyGate';
 import { ToastContainer } from './components/Toast';
 import { DashboardPage } from './pages/DashboardPage';
+import { PlatformDashboardPage } from './pages/PlatformDashboardPage';
 import { AppointmentsListPage } from './pages/AppointmentsListPage';
 import { AppointmentDetailPage } from './pages/AppointmentDetailPage';
 import { DeadLetterPage } from './pages/DeadLetterPage';
@@ -19,6 +20,11 @@ const AdminApp = (): JSX.Element => (
     <AdminKeyGate>
       <Routes>
         <Route path="/" element={<DashboardPage />} />
+        {/* Fase 6 (ADR-017): sin guard de rol propio en la ruta -- el
+            backend (platform_dashboard:read) ya rechaza con 403 a
+            cualquier rol de tenant; el ítem del menú además se oculta para
+            no ofrecer un enlace que llevaría a un error (ver Sidebar.tsx). */}
+        <Route path="/platform" element={<PlatformDashboardPage />} />
         <Route path="/appointments" element={<AppointmentsListPage />} />
         <Route path="/appointments/:id" element={<AppointmentDetailPage />} />
         <Route path="/dead-letter" element={<DeadLetterPage />} />
