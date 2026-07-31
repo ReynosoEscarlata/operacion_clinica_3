@@ -11,9 +11,12 @@ FROM base AS deps
 COPY package.json package-lock.json ./
 COPY services/appointments/package.json ./services/appointments/package.json
 COPY packages/authz/package.json ./packages/authz/package.json
-RUN npm install --workspace=services/appointments --workspace=packages/authz --include-workspace-root
+COPY packages/messaging/package.json ./packages/messaging/package.json
+RUN npm install --workspace=services/appointments --workspace=packages/authz --workspace=packages/messaging --include-workspace-root
 COPY packages/authz ./packages/authz
 RUN npm run build --workspace=packages/authz
+COPY packages/messaging ./packages/messaging
+RUN npm run build --workspace=packages/messaging
 COPY services/appointments/prisma ./services/appointments/prisma
 RUN npx prisma generate --schema=services/appointments/prisma/schema.prisma
 
@@ -26,8 +29,10 @@ ENV NODE_ENV=production
 COPY package.json package-lock.json ./
 COPY services/appointments/package.json ./services/appointments/package.json
 COPY packages/authz/package.json ./packages/authz/package.json
-RUN npm install --omit=dev --workspace=services/appointments --workspace=packages/authz --include-workspace-root
+COPY packages/messaging/package.json ./packages/messaging/package.json
+RUN npm install --omit=dev --workspace=services/appointments --workspace=packages/authz --workspace=packages/messaging --include-workspace-root
 COPY --from=build /app/packages/authz/dist ./packages/authz/dist
+COPY --from=build /app/packages/messaging/dist ./packages/messaging/dist
 COPY --from=build /app/services/appointments/dist ./services/appointments/dist
 COPY services/appointments/prisma ./services/appointments/prisma
 RUN npx prisma generate --schema=services/appointments/prisma/schema.prisma

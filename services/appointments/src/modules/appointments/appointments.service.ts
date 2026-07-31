@@ -265,11 +265,11 @@ export class AppointmentService {
   // Transiciona CONFIRMED -> PAID y encola el recordatorio (24h antes de la
   // cita), igual que el monolito hace desde payments.service.ts al recibir
   // el webhook payment_intent.succeeded. Invocado por
-  // src/lib/event-consumer.ts al consumir PaymentSucceeded (publicado por
-  // Payments vía Outbox/Redis Streams — ver server.ts). Es idempotente a
-  // nivel de quien la llama: si la cita ya no está en CONFIRMED (evento
-  // duplicado o re-entregado), el consumer trata INVALID_STATE_TRANSITION
-  // como éxito, no como fallo a reintentar.
+  // lib/domain-event-handlers.ts al consumir PaymentSucceeded (publicado
+  // por Payments vía Outbox/SNS-SQS, ADR-014 — ver server.ts). Es
+  // idempotente a nivel de quien la llama: si la cita ya no está en
+  // CONFIRMED (evento duplicado o re-entregado), el handler trata
+  // INVALID_STATE_TRANSITION como éxito, no como fallo a reintentar.
   async confirmPayment(id: string, stripePaymentIntentId: string): Promise<Appointment> {
     const updated = await this.stateMachine.transition(id, 'PAID', {
       trigger: 'webhook',

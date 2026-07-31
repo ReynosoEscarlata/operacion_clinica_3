@@ -1,14 +1,11 @@
+import type { EventHandler } from '@clinica/messaging';
 import type { AppointmentStatus } from '@prisma/client';
-import type { Job } from 'bullmq';
-import { Worker } from 'bullmq';
 
-import { getRedisConnectionOptions } from '../../config/redis.js';
 import type { Logger } from '../../lib/logger.js';
 import { requestContextStorage } from '../../lib/request-context.js';
 import { runWithTenant } from '../../lib/tenant-context.js';
 import type { AppointmentStateMachine } from '../../modules/appointments/state-machine.js';
 import type { ExpirationJobData } from '../jobs/expiration.job.js';
-import { APPOINTMENT_EXPIRATION_QUEUE } from '../queues.js';
 
 interface MinimalLogger {
   info: (obj: Record<string, unknown>, msg?: string) => void;
@@ -21,12 +18,8 @@ export interface ExpirationJobDeps {
   logger: MinimalLogger;
 }
 
-export interface ExpirationWorkerDeps {
+export interface ExpirationHandlerDeps {
   findStatusById: (appointmentId: string) => Promise<AppointmentStatus | null>;
-  // Resuelve el tenant de la cita ANTES de tocar cualquier repositorio --
-  // este worker corre en background, sin ningún TenantContext de request
-  // (ver resolveTenantForAppointment en lib/tenant-scoped.ts).
-  resolveTenant: (appointmentId: string) => Promise<string | null>;
   stateMachine: AppointmentStateMachine;
   logger: Logger;
 }
@@ -56,28 +49,23 @@ export const processExpirationJob = async (
   });
 };
 
-export const buildExpirationWorker = (deps: ExpirationWorkerDeps): Worker<ExpirationJobData> => {
-  return new Worker<ExpirationJobData>(
-    APPOINTMENT_EXPIRATION_QUEUE,
-    async (job: Job<ExpirationJobData>) => {
-      const jobLogger = deps.logger.child({
-        queue: APPOINTMENT_EXPIRATION_QUEUE,
-        jobId: job.id,
-        ...(job.data.requestId ? { requestId: job.data.requestId } : {}),
-      });
+// Reemplaza buildExpirationWorker (BullMQ): consume la cola
+// appointment-expiration vía @clinica/messaging. El tenantId ya viene en el
+// envelope (lo puso enqueueAppointmentExpiration) -- no hace falta
+// resolverlo de nuevo desde la BD como hacía el Worker de BullMQ.
+export const buildExpirationEventHandler = (deps: ExpirationHandlerDeps): EventHandler => {
+  return async (event) => {
+    const { appointmentId, requestId } = event.payload as { appointmentId: string; requestId?: string };
+    const jobLogger = deps.logger.child({
+      queue: 'appointment-expiration',
+      eventId: event.eventId,
+      ...(requestId ? { requestId } : {}),
+    });
 
-      await requestContextStorage.run({ requestId: job.data.requestId ?? String(job.id) }, async () => {
-        const tenantId = await deps.resolveTenant(job.data.appointmentId);
-        if (!tenantId) {
-          jobLogger.warn({ appointmentId: job.data.appointmentId }, 'Job de expiración: cita no encontrada');
-          return;
-        }
-
-        await runWithTenant(tenantId, () =>
-          processExpirationJob(job.data, { ...deps, logger: jobLogger }),
-        );
-      });
-    },
-    { connection: getRedisConnectionOptions() },
-  );
+    await requestContextStorage.run({ requestId: requestId ?? event.eventId }, () =>
+      runWithTenant(event.tenantId, () =>
+        processExpirationJob({ appointmentId }, { findStatusById: deps.findStatusById, stateMachine: deps.stateMachine, logger: jobLogger }),
+      ),
+    );
+  };
 };

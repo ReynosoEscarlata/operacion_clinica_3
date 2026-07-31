@@ -32,8 +32,6 @@ const buildAppointment = (overrides: Partial<Appointment> = {}): Appointment =>
     ...overrides,
   }) as Appointment;
 
-const resolveTenant = vi.fn().mockResolvedValue(TENANT_ID);
-
 describe('processReminderJob', () => {
   it('transiciona PAID -> REMINDED sin enviar ningún email (responsabilidad de Notifications)', async () => {
     const transition = vi.fn().mockResolvedValue(buildAppointment({ status: 'REMINDED' }));
@@ -44,7 +42,7 @@ describe('processReminderJob', () => {
 
     await processReminderJob(
       { appointmentId: 'apt-1' },
-      { appointmentRepository: repository, resolveTenant, stateMachine, logger: buildLogger() as never },
+      { appointmentRepository: repository, stateMachine, logger: buildLogger() as never },
     );
 
     expect(transition).toHaveBeenCalledWith('apt-1', 'REMINDED', {
@@ -62,13 +60,13 @@ describe('processReminderJob', () => {
 
     await processReminderJob(
       { appointmentId: 'apt-1' },
-      { appointmentRepository: repository, resolveTenant, stateMachine, logger: buildLogger() as never },
+      { appointmentRepository: repository, stateMachine, logger: buildLogger() as never },
     );
 
     expect(transition).not.toHaveBeenCalled();
   });
 
-  it('lanza si la cita no existe (para que BullMQ reintente)', async () => {
+  it('lanza si la cita no existe (para que el consumer la reintente)', async () => {
     const repository = {
       findById: vi.fn().mockResolvedValue(null),
     } as unknown as AppointmentRepository;
@@ -77,12 +75,7 @@ describe('processReminderJob', () => {
     await expect(
       processReminderJob(
         { appointmentId: 'no-existe' },
-        {
-          appointmentRepository: repository,
-          resolveTenant: vi.fn().mockResolvedValue(null),
-          stateMachine,
-          logger: buildLogger() as never,
-        },
+        { appointmentRepository: repository, stateMachine, logger: buildLogger() as never },
       ),
     ).rejects.toThrow('Cita no encontrada');
   });

@@ -1,42 +1,45 @@
 import { randomUUID } from 'node:crypto';
 
+import { CreateQueueCommand, DeleteQueueCommand, SendMessageCommand } from '@aws-sdk/client-sqs';
+import { buildSqsClient, pollQueueOnce } from '@clinica/messaging';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
+import { buildAwsConfig } from '../../src/config/aws.js';
 import { prisma } from '../../src/config/prisma.js';
-import { redis } from '../../src/config/redis.js';
-import { AppError } from '../../src/lib/app-error.js';
-import { ensureConsumerGroup, runConsumerBatchOnce, type EventHandler } from '../../src/lib/event-consumer.js';
-import { DOMAIN_EVENTS_STREAM } from '../../src/lib/outbox-relay.js';
-import { buildAppointmentRepository } from '../../src/modules/appointments/appointments.repository.js';
-import { buildStateMachine } from '../../src/modules/appointments/state-machine.js';
-import { buildAppointmentService } from '../../src/modules/appointments/appointments.service.js';
+import { buildDomainEventHandlers } from '../../src/lib/domain-event-handlers.js';
 import { logger } from '../../src/lib/logger.js';
-import { runWithTenant } from '../../src/lib/tenant-context.js';
-import { resolveTenantForAppointment, withTenantId } from '../../src/lib/tenant-scoped.js';
+import { buildAppointmentRepository } from '../../src/modules/appointments/appointments.repository.js';
+import { buildAppointmentService } from '../../src/modules/appointments/appointments.service.js';
+import { buildStateMachine } from '../../src/modules/appointments/state-machine.js';
+import { withTenantId } from '../../src/lib/tenant-scoped.js';
 import type { DoctorsClient } from '../../src/clients/doctors-client.js';
 import type { PaymentsClient } from '../../src/clients/payments-client.js';
 
-const GROUP = `test-group-${randomUUID()}`;
 const TEST_TENANT_ID = '66666666-6666-6666-6666-666666666666';
 
-// Simula lo que hace Payments al publicar (escribe directo al stream, sin
-// pasar por su propio Outbox — lo que importa acá es que Appointments lo
-// consuma correctamente, no reprobar el relay que ya se prueba en
-// services/payments).
-const publishToStream = async (type: string, payload: Record<string, unknown>): Promise<void> => {
-  await redis.xadd(
-    DOMAIN_EVENTS_STREAM,
-    '*',
-    'eventId',
-    randomUUID(),
-    'type',
-    type,
-    'payload',
-    JSON.stringify(payload),
+const sqsClient = buildSqsClient(buildAwsConfig());
+
+// Publica directo a una cola SQS de test, como si SNS ya hubiera hecho el
+// fan-out (rawMessageDelivery) -- simula "lo que llega", no un test
+// end-to-end del publisher (ese ya se prueba en outbox-relay.test.ts de
+// cada servicio productor).
+const publishToQueue = async (queueUrl: string, type: string, payload: Record<string, unknown>): Promise<void> => {
+  await sqsClient.send(
+    new SendMessageCommand({
+      QueueUrl: queueUrl,
+      MessageBody: JSON.stringify({
+        eventId: randomUUID(),
+        tenantId: TEST_TENANT_ID,
+        type,
+        payload,
+        publishedAt: new Date().toISOString(),
+      }),
+    }),
   );
 };
 
-describe('Consumer de eventos de dominio (Redis Streams reales)', () => {
+describe('Consumer de eventos de dominio (Appointments, Postgres + SQS reales vía LocalStack)', () => {
+  let queueUrl: string;
   let patientId: string;
   const doctorId = randomUUID();
 
@@ -58,49 +61,13 @@ describe('Consumer de eventos de dominio (Redis Streams reales)', () => {
     enqueueReminder: async () => undefined,
     logger,
   });
-
-  const handlePaymentSucceeded: EventHandler = async (event) => {
-    const { appointmentId, paymentIntentId } = event.payload as {
-      appointmentId: string;
-      paymentIntentId: string;
-    };
-    const tenantId = await resolveTenantForAppointment(prisma, appointmentId);
-    if (!tenantId) {
-      return;
-    }
-    await runWithTenant(tenantId, async () => {
-      try {
-        await appointmentService.confirmPayment(appointmentId, paymentIntentId);
-      } catch (error) {
-        if (error instanceof AppError && error.code === 'INVALID_STATE_TRANSITION') {
-          return;
-        }
-        throw error;
-      }
-    });
-  };
-
-  const handlePaymentFailed: EventHandler = async (event) => {
-    const { appointmentId, paymentIntentId, reason } = event.payload as {
-      appointmentId: string;
-      paymentIntentId: string;
-      reason: string | null;
-    };
-    const tenantId = await resolveTenantForAppointment(prisma, appointmentId);
-    if (!tenantId) {
-      return;
-    }
-    await runWithTenant(tenantId, () =>
-      appointmentService.recordPaymentFailed(appointmentId, paymentIntentId, reason),
-    );
-  };
+  const handlers = buildDomainEventHandlers({ appointmentService, logger });
 
   beforeAll(async () => {
-    // Arranca en '$' (solo eventos nuevos a partir de ahora): el stream es
-    // compartido y persiste entre corridas de test reales contra Redis, así
-    // que un grupo nuevo empezando en '0' reprocesaría historial de citas
-    // de corridas anteriores que ya no existen.
-    await ensureConsumerGroup(redis, GROUP, '$');
+    const queue = await sqsClient.send(
+      new CreateQueueCommand({ QueueName: `test-appointments-consumer-${randomUUID()}` }),
+    );
+    queueUrl = queue.QueueUrl as string;
 
     const patient = await withTenantId(prisma, TEST_TENANT_ID, (tx) =>
       tx.patient.create({
@@ -116,12 +83,12 @@ describe('Consumer de eventos de dominio (Redis Streams reales)', () => {
   });
 
   afterAll(async () => {
+    await sqsClient.send(new DeleteQueueCommand({ QueueUrl: queueUrl })).catch(() => undefined);
     await withTenantId(prisma, TEST_TENANT_ID, async (tx) => {
       await tx.appointment.deleteMany({ where: { patientId } });
       await tx.patient.delete({ where: { id: patientId } }).catch(() => undefined);
     });
     await prisma.$disconnect();
-    redis.disconnect();
   });
 
   it('PaymentSucceeded: transiciona la cita CONFIRMED -> PAID', async () => {
@@ -140,22 +107,15 @@ describe('Consumer de eventos de dominio (Redis Streams reales)', () => {
       }),
     );
 
-    await publishToStream('PaymentSucceeded', {
+    await publishToQueue(queueUrl, 'PaymentSucceeded', {
       appointmentId: appointment.id,
       paymentIntentId: appointment.stripePaymentIntentId,
     });
 
-    const processed = await runConsumerBatchOnce(
-      {
-        redis,
-        groupName: GROUP,
-        consumerName: 'test-consumer-1',
-        logger,
-        handlers: { PaymentSucceeded: handlePaymentSucceeded, PaymentFailed: handlePaymentFailed },
-      },
-      200,
-    );
-
+    let processed = 0;
+    for (let i = 0; i < 5 && processed < 1; i += 1) {
+      processed += await pollQueueOnce({ sqsClient, queueUrl, logger, handlers, waitTimeSeconds: 2 });
+    }
     expect(processed).toBeGreaterThanOrEqual(1);
 
     const updated = await withTenantId(prisma, TEST_TENANT_ID, (tx) =>
@@ -181,22 +141,15 @@ describe('Consumer de eventos de dominio (Redis Streams reales)', () => {
       }),
     );
 
-    await publishToStream('PaymentSucceeded', {
+    await publishToQueue(queueUrl, 'PaymentSucceeded', {
       appointmentId: appointment.id,
       paymentIntentId: appointment.stripePaymentIntentId,
     });
 
-    const processed = await runConsumerBatchOnce(
-      {
-        redis,
-        groupName: GROUP,
-        consumerName: 'test-consumer-1',
-        logger,
-        handlers: { PaymentSucceeded: handlePaymentSucceeded, PaymentFailed: handlePaymentFailed },
-      },
-      200,
-    );
-
+    let processed = 0;
+    for (let i = 0; i < 5 && processed < 1; i += 1) {
+      processed += await pollQueueOnce({ sqsClient, queueUrl, logger, handlers, waitTimeSeconds: 2 });
+    }
     expect(processed).toBeGreaterThanOrEqual(1);
 
     const updated = await withTenantId(prisma, TEST_TENANT_ID, (tx) =>
@@ -221,22 +174,17 @@ describe('Consumer de eventos de dominio (Redis Streams reales)', () => {
       }),
     );
 
-    await publishToStream('PaymentFailed', {
+    await publishToQueue(queueUrl, 'PaymentFailed', {
       appointmentId: appointment.id,
       paymentIntentId: appointment.stripePaymentIntentId,
       reason: 'Tarjeta rechazada',
     });
 
-    await runConsumerBatchOnce(
-      {
-        redis,
-        groupName: GROUP,
-        consumerName: 'test-consumer-1',
-        logger,
-        handlers: { PaymentSucceeded: handlePaymentSucceeded, PaymentFailed: handlePaymentFailed },
-      },
-      200,
-    );
+    let processed = 0;
+    for (let i = 0; i < 5 && processed < 1; i += 1) {
+      processed += await pollQueueOnce({ sqsClient, queueUrl, logger, handlers, waitTimeSeconds: 2 });
+    }
+    expect(processed).toBeGreaterThanOrEqual(1);
 
     const updated = await withTenantId(prisma, TEST_TENANT_ID, (tx) =>
       tx.appointment.findUnique({

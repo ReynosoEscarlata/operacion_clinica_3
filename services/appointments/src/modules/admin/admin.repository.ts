@@ -1,23 +1,23 @@
-import type { PrismaClient } from '@prisma/client';
+import type { EventHandler } from '@clinica/messaging';
 
 import { AppError } from '../../lib/app-error.js';
-import { withTenant } from '../../lib/tenant-scoped.js';
-import { writeOutboxEvent } from '../../lib/outbox.js';
 import type { DeadLetterRepository } from '../../lib/dead-letter.repository.js';
 
 export interface AdminRepository {
-  // "Reintentar" un evento en dead-letter no reinyecta el mensaje viejo al
-  // stream (Redis Streams no permite re-escribir un ID ya entregado) —
-  // escribe un OutboxEvent nuevo con el mismo type/payload, que el relay va
-  // a publicar como una entrada fresca, y borra la entrada de dead-letter.
-  // Todo en una transacción: o se reintenta y se borra, o ninguna de las
-  // dos (nunca queremos perder el registro sin haber reintentado).
   retryDeadLetterEntry: (id: string) => Promise<void>;
 }
 
+// "Reintentar" una entrada re-invoca el MISMO handler que hubiera corrido el
+// consumer real (el mapa `handlers` construido en server.ts, ver
+// domain-event-handlers.ts), con el payload que quedó guardado en la
+// entrada de dead-letter -- ya no republica un OutboxEvent nuevo (ADR-014
+// unifica este mecanismo con el que ya usaba Notifications: Redis Streams
+// no permitía reinyectar un ID ya entregado, pero eso ya no aplica). Si
+// vuelve a fallar, la entrada NO se borra (se puede reintentar de nuevo) y
+// el error se relanza tal cual.
 export const buildAdminRepository = (
-  prisma: PrismaClient,
   deadLetterRepository: DeadLetterRepository,
+  handlers: Record<string, EventHandler>,
 ): AdminRepository => ({
   retryDeadLetterEntry: async (id) => {
     const entry = await deadLetterRepository.findById(id);
@@ -25,9 +25,23 @@ export const buildAdminRepository = (
       throw new AppError(404, 'DEAD_LETTER_NOT_FOUND', 'Entrada de dead-letter no encontrada');
     }
 
-    await withTenant(prisma, async (tx) => {
-      await writeOutboxEvent(tx, entry.eventType, entry.payload as Record<string, unknown>);
-      await tx.deadLetterEntry.delete({ where: { id } });
+    const handler = handlers[entry.eventType];
+    if (!handler) {
+      throw new AppError(
+        422,
+        'NO_HANDLER_FOR_EVENT_TYPE',
+        `No hay handler registrado para el tipo de evento ${entry.eventType}`,
+      );
+    }
+
+    await handler({
+      eventId: entry.eventId,
+      tenantId: entry.tenantId,
+      type: entry.eventType,
+      payload: entry.payload as Record<string, unknown>,
+      publishedAt: entry.failedAt.toISOString(),
     });
+
+    await deadLetterRepository.remove(id);
   },
 });

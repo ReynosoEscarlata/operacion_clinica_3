@@ -1,24 +1,22 @@
+import { buildSnsClient, buildSqsClient, startDlqDrain, startQueueConsumer, type DeadLetterHandler } from '@clinica/messaging';
+
 import { buildApp } from './app.js';
+import { buildAwsConfig } from './config/aws.js';
 import { env } from './config/env.js';
 import { prisma } from './config/prisma.js';
-import { redis } from './config/redis.js';
 import { initSentry, registerProcessErrorHandlers } from './config/sentry.js';
-import { AppError } from './lib/app-error.js';
 import { buildDeadLetterRepository } from './lib/dead-letter.repository.js';
-import type { DeadLetterHandler, EventHandler } from './lib/event-consumer.js';
-import { startEventConsumer } from './lib/event-consumer.js';
+import { buildDomainEventHandlers } from './lib/domain-event-handlers.js';
 import { logger } from './lib/logger.js';
 import { startOutboxRelay } from './lib/outbox-relay.js';
-import { runWithTenant } from './lib/tenant-context.js';
-import { resolveTenantForAppointment } from './lib/tenant-scoped.js';
 import { buildDefaultAppointmentService } from './modules/appointments/appointments.routes.js';
 import { buildAppointmentRepository } from './modules/appointments/appointments.repository.js';
 import { buildStateMachine } from './modules/appointments/state-machine.js';
-import { scheduleNoShowJob } from './queues/jobs/noshow.job.js';
-import { closeQueues } from './queues/queues.js';
-import { buildExpirationWorker } from './queues/workers/expiration.worker.js';
-import { buildNoShowWorker } from './queues/workers/noshow.worker.js';
-import { buildReminderWorker } from './queues/workers/reminder.worker.js';
+import { APPOINTMENT_EXPIRATION_EVENT_TYPE } from './queues/jobs/expiration.job.js';
+import { APPOINTMENT_REMINDER_EVENT_TYPE } from './queues/jobs/reminder.job.js';
+import { buildExpirationEventHandler } from './queues/workers/expiration.worker.js';
+import { buildReminderEventHandler } from './queues/workers/reminder.worker.js';
+import { startNoShowConsumer } from './queues/workers/noshow.worker.js';
 
 const start = async (): Promise<void> => {
   initSentry();
@@ -26,104 +24,38 @@ const start = async (): Promise<void> => {
 
   const stateMachine = buildStateMachine(prisma, logger);
   const appointmentRepository = buildAppointmentRepository(prisma);
-  const resolveTenant = (appointmentId: string): Promise<string | null> =>
-    resolveTenantForAppointment(prisma, appointmentId);
 
-  const app = await buildApp();
+  // El módulo admin (dashboard/dead-letter) reusa la misma instancia y el
+  // mismo mapa de handlers que el consumer real -- "reintentar" una entrada
+  // de dead-letter re-invoca el handler real, no uno aparte.
+  const appointmentService = buildDefaultAppointmentService({ repository: appointmentRepository, stateMachine });
+  const domainEventHandlers = buildDomainEventHandlers({ appointmentService, logger });
 
-  const expirationWorker = buildExpirationWorker({
-    findStatusById: (id) => appointmentRepository.findStatusById(id),
-    resolveTenant,
-    stateMachine,
-    logger,
-  });
+  const app = await buildApp({ admin: { appointmentRepository, domainEventHandlers } });
 
-  const reminderWorker = buildReminderWorker({ appointmentRepository, resolveTenant, stateMachine, logger });
-  const noShowWorker = buildNoShowWorker({ appointmentRepository, stateMachine, logger });
-
-  await scheduleNoShowJob();
+  const snsClient = buildSnsClient(buildAwsConfig());
+  const sqsClient = buildSqsClient(buildAwsConfig());
 
   // Publica AppointmentCreated/AppointmentStatusChanged/PatientUpdated
-  // (escritos en su propio Outbox) a Redis Streams para que Notifications
-  // los consuma en una fase futura.
-  const stopOutboxRelay = startOutboxRelay({ prisma, redis, logger });
-
-  // Consume PaymentSucceeded/PaymentFailed publicados por Payments — cierra
-  // el ciclo de confirmación de pago descrito en ADR-002/RFC-001. Usa una
-  // conexión Redis propia porque XREADGROUP con BLOCK ocupa la conexión.
-  // Corre en background: sin TenantContext de request, así que cada
-  // handler resuelve el tenant del appointmentId embebido en el evento
-  // (resolveTenantForAppointment, SECURITY DEFINER) antes de tocar
-  // cualquier repositorio -- el envelope de Redis Streams todavía no lleva
-  // tenant_id de punta a punta (eso es Fase 3b, ADR-014).
-  const appointmentService = buildDefaultAppointmentService();
-  const consumerRedis = redis.duplicate();
-
-  const handlePaymentSucceeded: EventHandler = async (event) => {
-    const { appointmentId, paymentIntentId } = event.payload as {
-      appointmentId: string;
-      paymentIntentId: string;
-    };
-    const tenantId = await resolveTenant(appointmentId);
-    if (!tenantId) {
-      logger.warn({ appointmentId }, 'PaymentSucceeded ignorado: cita no encontrada');
-      return;
-    }
-
-    await runWithTenant(tenantId, async () => {
-      try {
-        await appointmentService.confirmPayment(appointmentId, paymentIntentId);
-      } catch (error) {
-        if (error instanceof AppError && error.code === 'INVALID_STATE_TRANSITION') {
-          logger.info(
-            { appointmentId },
-            'PaymentSucceeded ignorado: la cita ya no está en CONFIRMED (evento duplicado o fuera de orden)',
-          );
-          return;
-        }
-        throw error;
-      }
-    });
-  };
-
-  const handlePaymentFailed: EventHandler = async (event) => {
-    const { appointmentId, paymentIntentId, reason } = event.payload as {
-      appointmentId: string;
-      paymentIntentId: string;
-      reason: string | null;
-    };
-    const tenantId = await resolveTenant(appointmentId);
-    if (!tenantId) {
-      logger.warn({ appointmentId }, 'PaymentFailed ignorado: cita no encontrada');
-      return;
-    }
-
-    await runWithTenant(tenantId, () =>
-      appointmentService.recordPaymentFailed(appointmentId, paymentIntentId, reason),
-    );
-  };
+  // (escritos en su propio Outbox) a SNS para que Notifications los consuma.
+  const stopOutboxRelay = startOutboxRelay({ prisma, snsClient, topicArn: env.DOMAIN_EVENTS_TOPIC_ARN, logger });
 
   const deadLetterRepository = buildDeadLetterRepository(prisma);
-  const onDeadLetter: DeadLetterHandler = async (event, error, attempts) => {
-    // El payload de PaymentSucceeded/PaymentFailed siempre trae
-    // appointmentId (ver handlers arriba) -- se resuelve el tenant desde
-    // ahí para poder registrar la entrada (DeadLetterEntry.tenantId es NOT
-    // NULL). Si por algún motivo no se puede resolver (evento corrupto sin
-    // appointmentId válido), se loguea como error crítico en vez de
-    // silenciar la pérdida del registro.
-    const appointmentId = (event.payload as { appointmentId?: string }).appointmentId;
-    const tenantId = appointmentId ? await resolveTenant(appointmentId) : null;
-
-    if (!tenantId) {
+  const onDomainEventDeadLetter: DeadLetterHandler = async (event, error, attempts) => {
+    // event.tenantId puede ser null solo si el envelope ni siquiera pudo
+    // parsearse (ver bestEffortEvent en @clinica/messaging) -- DeadLetterEntry.
+    // tenantId es NOT NULL (Fase 3a), así que ese caso se loguea como error
+    // crítico en vez de perder silenciosamente el registro.
+    if (!event.tenantId) {
       logger.error(
         { event, error: error instanceof Error ? error.message : String(error) },
-        'No se pudo resolver el tenant de un evento a dead-letter -- registro perdido',
+        'Evento de dominio sin tenantId a dead-letter -- registro perdido',
       );
       return;
     }
 
     await deadLetterRepository.record(
-      tenantId,
+      event.tenantId,
       event.eventId,
       event.type,
       event.payload,
@@ -132,31 +64,102 @@ const start = async (): Promise<void> => {
     );
   };
 
-  const stopEventConsumer = startEventConsumer({
-    redis: consumerRedis,
-    groupName: 'appointments',
-    consumerName: `appointments-${process.pid}`,
+  // Consume PaymentSucceeded/PaymentFailed publicados por Payments -- cierra
+  // el ciclo de confirmación de pago descrito en ADR-002/RFC-001. Fase 3b
+  // (ADR-014): cola SQS propia suscrita al topic SNS compartido, reemplaza
+  // el consumer group que tenía sobre el stream de Redis.
+  const stopDomainEventsConsumer = startQueueConsumer({
+    sqsClient,
+    queueUrl: env.APPOINTMENTS_DOMAIN_EVENTS_QUEUE_URL,
+    maxReceiveCount: env.APPOINTMENTS_DOMAIN_EVENTS_MAX_RECEIVE_COUNT,
+    logger,
+    handlers: domainEventHandlers,
+    onDeadLetter: onDomainEventDeadLetter,
+  });
+
+  const stopDomainEventsDlqDrain = startDlqDrain({
+    sqsClient,
+    dlqUrl: env.APPOINTMENTS_DOMAIN_EVENTS_DLQ_URL,
+    maxReceiveCount: env.APPOINTMENTS_DOMAIN_EVENTS_MAX_RECEIVE_COUNT,
+    logger,
+    onDrain: onDomainEventDeadLetter,
+  });
+
+  // Expiration (1 intento, sin dead-letter) y reminders (3 intentos, con
+  // dead-letter) -- reemplazan los Workers de BullMQ. El trigger recurrente
+  // de no-show (rate(15 minutes)) es infra estática (CfnSchedule, ver
+  // PLAN.md CDK), este servicio solo consume su cola.
+  const stopExpirationConsumer = startQueueConsumer({
+    sqsClient,
+    queueUrl: env.APPOINTMENT_EXPIRATION_QUEUE_URL,
+    maxReceiveCount: env.APPOINTMENT_EXPIRATION_MAX_RECEIVE_COUNT,
     logger,
     handlers: {
-      PaymentSucceeded: handlePaymentSucceeded,
-      PaymentFailed: handlePaymentFailed,
+      [APPOINTMENT_EXPIRATION_EVENT_TYPE]: buildExpirationEventHandler({
+        findStatusById: (id) => appointmentRepository.findStatusById(id),
+        stateMachine,
+        logger,
+      }),
     },
-    onDeadLetter,
+  });
+
+  const onReminderDeadLetter: DeadLetterHandler = async (event, error, attempts) => {
+    if (!event.tenantId) {
+      logger.error(
+        { event, error: error instanceof Error ? error.message : String(error) },
+        'Job de recordatorio sin tenantId a dead-letter -- registro perdido',
+      );
+      return;
+    }
+    await deadLetterRepository.record(
+      event.tenantId,
+      event.eventId,
+      event.type,
+      event.payload,
+      error instanceof Error ? error.message : String(error),
+      attempts,
+    );
+  };
+
+  const stopRemindersConsumer = startQueueConsumer({
+    sqsClient,
+    queueUrl: env.APPOINTMENT_REMINDERS_QUEUE_URL,
+    maxReceiveCount: env.APPOINTMENT_REMINDERS_MAX_RECEIVE_COUNT,
+    logger,
+    handlers: {
+      [APPOINTMENT_REMINDER_EVENT_TYPE]: buildReminderEventHandler({ appointmentRepository, stateMachine, logger }),
+    },
+    onDeadLetter: onReminderDeadLetter,
+  });
+
+  const stopRemindersDlqDrain = startDlqDrain({
+    sqsClient,
+    dlqUrl: env.APPOINTMENT_REMINDERS_DLQ_URL,
+    maxReceiveCount: env.APPOINTMENT_REMINDERS_MAX_RECEIVE_COUNT,
+    logger,
+    onDrain: onReminderDeadLetter,
+  });
+
+  const stopNoShowConsumer = startNoShowConsumer({
+    sqsClient,
+    queueUrl: env.APPOINTMENT_NOSHOW_QUEUE_URL,
+    appointmentRepository,
+    stateMachine,
+    logger,
   });
 
   const shutdown = async (signal: string): Promise<void> => {
     logger.info({ signal }, 'Iniciando apagado del servicio');
 
-    stopEventConsumer();
+    stopDomainEventsConsumer();
+    stopDomainEventsDlqDrain();
+    stopExpirationConsumer();
+    stopRemindersConsumer();
+    stopRemindersDlqDrain();
+    stopNoShowConsumer();
     stopOutboxRelay();
-    consumerRedis.disconnect();
     await app.close();
-    await expirationWorker.close();
-    await reminderWorker.close();
-    await noShowWorker.close();
-    await closeQueues();
     await prisma.$disconnect();
-    redis.disconnect();
 
     logger.info({ signal }, 'Servicio apagado correctamente');
     process.exit(0);

@@ -5,7 +5,12 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { buildApp } from '../../src/app.js';
 import { prisma } from '../../src/config/prisma.js';
+import { buildDomainEventHandlers } from '../../src/lib/domain-event-handlers.js';
+import { logger } from '../../src/lib/logger.js';
 import { withTenantId } from '../../src/lib/tenant-scoped.js';
+import { buildAppointmentRepository } from '../../src/modules/appointments/appointments.repository.js';
+import { buildAppointmentService } from '../../src/modules/appointments/appointments.service.js';
+import { buildStateMachine } from '../../src/modules/appointments/state-machine.js';
 import type { DoctorsClient } from '../../src/clients/doctors-client.js';
 import type { PaymentsClient } from '../../src/clients/payments-client.js';
 
@@ -51,13 +56,33 @@ describe('Admin (dashboard/eventos/dead-letter, integración con Postgres real)'
     );
     patientId = patient.id;
 
+    const enqueueReminder = vi.fn().mockResolvedValue(undefined);
+    const stateMachine = buildStateMachine(prisma, logger);
+    // La misma instancia de AppointmentService se comparte entre las rutas
+    // de /v1/appointments y el mapa de domainEventHandlers usado por el
+    // retry de dead-letter -- mismos fakes, para que "reintentar" un
+    // PaymentSucceeded no dispare llamadas HTTP reales a Doctors/Payments.
+    const appointmentService = buildAppointmentService({
+      repository: buildAppointmentRepository(prisma),
+      patientRepository: { findById: async () => null } as never,
+      doctorsClient: buildFakeDoctorsClient(),
+      paymentsClient: buildFakePaymentsClient(),
+      stateMachine,
+      enqueueExpiration: vi.fn().mockResolvedValue(undefined),
+      enqueueReminder,
+      logger,
+    });
+    const domainEventHandlers = buildDomainEventHandlers({ appointmentService, logger });
+
     app = await buildApp({
       appointments: {
         doctorsClient: buildFakeDoctorsClient(),
         paymentsClient: buildFakePaymentsClient(),
+        stateMachine,
         enqueueExpiration: vi.fn().mockResolvedValue(undefined),
-        enqueueReminder: vi.fn().mockResolvedValue(undefined),
+        enqueueReminder,
       },
+      admin: { domainEventHandlers },
     });
     await app.ready();
   });
@@ -177,14 +202,30 @@ describe('Admin (dashboard/eventos/dead-letter, integración con Postgres real)'
   });
 
   describe('dead-letter', () => {
-    it('lista, reintenta (republica un OutboxEvent nuevo) y borra una entrada', async () => {
+    it('lista, reintenta (re-invoca el handler real) y borra una entrada', async () => {
+      const appointment = await withTenantId(prisma, TEST_TENANT_ID, (tx) =>
+        tx.appointment.create({
+          data: {
+            tenantId: TEST_TENANT_ID,
+            patientId,
+            doctorId,
+            dateTime: new Date(Date.now() + 86_400_000),
+            durationMinutes: 30,
+            amountCents: 50_000,
+            status: 'CONFIRMED',
+            stripePaymentIntentId: `pi_${randomUUID()}`,
+          },
+        }),
+      );
+      createdAppointmentIds.push(appointment.id);
+
       const entry = await withTenantId(prisma, TEST_TENANT_ID, (tx) =>
         tx.deadLetterEntry.create({
           data: {
             tenantId: TEST_TENANT_ID,
             eventId: randomUUID(),
             eventType: 'PaymentSucceeded',
-            payload: { appointmentId: randomUUID() },
+            payload: { appointmentId: appointment.id, paymentIntentId: appointment.stripePaymentIntentId },
             error: 'boom',
             attempts: 5,
           },
@@ -214,16 +255,12 @@ describe('Admin (dashboard/eventos/dead-letter, integración con Postgres real)'
       );
       expect(stillThere).toBeNull();
 
-      const republished = await withTenantId(prisma, TEST_TENANT_ID, (tx) =>
-        tx.outboxEvent.findFirst({
-          where: {
-            type: 'PaymentSucceeded',
-            payload: { path: ['appointmentId'], equals: (entry.payload as { appointmentId: string }).appointmentId },
-          },
-        }),
+      // Prueba real de que se re-invocó el handler (no un republish): la
+      // cita transicionó CONFIRMED -> PAID, tal como haría el consumer real.
+      const updatedAppointment = await withTenantId(prisma, TEST_TENANT_ID, (tx) =>
+        tx.appointment.findUnique({ where: { id: appointment.id } }),
       );
-      expect(republished).toBeDefined();
-      expect(republished?.publishedAt).toBeNull();
+      expect(updatedAppointment?.status).toBe('PAID');
     });
 
     it('devuelve 404 al reintentar una entrada que no existe', async () => {

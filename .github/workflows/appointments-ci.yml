@@ -6,7 +6,9 @@ on:
     paths:
       - 'services/appointments/**'
       - 'packages/authz/**'
+      - 'packages/messaging/**'
       - 'packages/contracts/appointments/**'
+      - 'scripts/localstack-setup.mjs'
       # Contract test de mensajes (Pact, PLAN.md Fase 4): Appointments es el
       # provider/productor del evento — si Notifications cambia lo que
       # espera, commitea un pact nuevo acá.
@@ -18,7 +20,9 @@ on:
     paths:
       - 'services/appointments/**'
       - 'packages/authz/**'
+      - 'packages/messaging/**'
       - 'packages/contracts/appointments/**'
+      - 'scripts/localstack-setup.mjs'
       # Contract test de mensajes (Pact, PLAN.md Fase 4): Appointments es el
       # provider/productor del evento — si Notifications cambia lo que
       # espera, commitea un pact nuevo acá.
@@ -45,15 +49,20 @@ jobs:
           --health-timeout 5s
           --health-retries 5
 
-      redis:
-        image: redis:7-alpine
+      # Fase 3b (ADR-014): emula SNS/SQS/EventBridge Scheduler -- reemplaza
+      # redis (Streams para eventos de dominio, BullMQ para las 3 colas de
+      # expiration/reminders/noshow).
+      localstack:
+        image: localstack/localstack:3
         ports:
-          - 6379:6379
+          - 4566:4566
+        env:
+          SERVICES: sns,sqs,scheduler
         options: >-
-          --health-cmd "redis-cli ping"
+          --health-cmd "curl -f http://localhost:4566/_localstack/health"
           --health-interval 5s
           --health-timeout 5s
-          --health-retries 5
+          --health-retries 10
 
     env:
       NODE_ENV: test
@@ -61,9 +70,26 @@ jobs:
       LOG_LEVEL: silent
       DATABASE_URL: postgresql://appointments:appointments@localhost:5432/appointments_db?schema=public
       DATABASE_URL_APP: postgresql://app_role:app_role_dev_password@localhost:5432/appointments_db?schema=public
-      REDIS_URL: redis://localhost:6379
       DOCTORS_SERVICE_URL: http://localhost:4003
       PAYMENTS_SERVICE_URL: http://localhost:4004
+      AWS_REGION: us-east-1
+      AWS_ENDPOINT_URL: http://localhost:4566
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      DOMAIN_EVENTS_TOPIC_ARN: arn:aws:sns:us-east-1:000000000000:clinica-test-domain-events
+      APPOINTMENTS_DOMAIN_EVENTS_QUEUE_URL: http://sqs.us-east-1.localhost.localstack.cloud:4566/000000000000/clinica-test-appointments-domain-events
+      APPOINTMENTS_DOMAIN_EVENTS_DLQ_URL: http://sqs.us-east-1.localhost.localstack.cloud:4566/000000000000/clinica-test-appointments-domain-events-dlq
+      APPOINTMENTS_DOMAIN_EVENTS_MAX_RECEIVE_COUNT: 5
+      APPOINTMENT_EXPIRATION_QUEUE_URL: http://sqs.us-east-1.localhost.localstack.cloud:4566/000000000000/clinica-test-appointment-expiration
+      APPOINTMENT_EXPIRATION_QUEUE_ARN: arn:aws:sqs:us-east-1:000000000000:clinica-test-appointment-expiration
+      APPOINTMENT_EXPIRATION_MAX_RECEIVE_COUNT: 1
+      APPOINTMENT_REMINDERS_QUEUE_URL: http://sqs.us-east-1.localhost.localstack.cloud:4566/000000000000/clinica-test-appointment-reminders
+      APPOINTMENT_REMINDERS_QUEUE_ARN: arn:aws:sqs:us-east-1:000000000000:clinica-test-appointment-reminders
+      APPOINTMENT_REMINDERS_DLQ_URL: http://sqs.us-east-1.localhost.localstack.cloud:4566/000000000000/clinica-test-appointment-reminders-dlq
+      APPOINTMENT_REMINDERS_MAX_RECEIVE_COUNT: 3
+      APPOINTMENT_NOSHOW_QUEUE_URL: http://sqs.us-east-1.localhost.localstack.cloud:4566/000000000000/clinica-test-appointment-noshow
+      SCHEDULER_GROUP_NAME: clinica-test-appointment-schedules
+      SCHEDULER_EXECUTION_ROLE_ARN: arn:aws:iam::000000000000:role/clinica-test-scheduler-execution-role
 
     steps:
       - name: Checkout
@@ -74,13 +100,25 @@ jobs:
         with:
           node-version: '20'
 
-      # Workspace: @clinica/authz no esta publicado, hay que instalar desde
-      # la raiz (ver build: convertir el repo en npm workspaces).
+      # Workspace: @clinica/authz y @clinica/messaging no están publicados,
+      # hay que instalar desde la raíz (ver build: convertir el repo en npm
+      # workspaces).
       - name: Install dependencies (workspace root)
-        run: npm install --workspace=services/appointments --workspace=packages/authz --include-workspace-root
+        run: npm install --workspace=services/appointments --workspace=packages/authz --workspace=packages/messaging --include-workspace-root
 
       - name: Build @clinica/authz
         run: npm run build --workspace=packages/authz
+
+      - name: Build @clinica/messaging
+        run: npm run build --workspace=packages/messaging
+
+      - name: Install scripts dependencies
+        working-directory: scripts
+        run: npm install
+
+      - name: Provision LocalStack (topic/colas/DLQs/schedule-group)
+        working-directory: scripts
+        run: npm run localstack:setup
 
       - name: Generate Prisma Client
         working-directory: services/appointments
