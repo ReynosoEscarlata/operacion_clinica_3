@@ -21,6 +21,11 @@ export const registerRequestId = (app: FastifyInstance): void => {
     request.log = logger.child({ requestId });
     reply.header(REQUEST_ID_HEADER, requestId);
 
-    requestContextStorage.enterWith({ requestId });
+    const userAgent = request.headers['user-agent'];
+    requestContextStorage.enterWith({
+      requestId,
+      ip: request.ip,
+      userAgent: typeof userAgent === 'string' ? userAgent : null,
+    });
   });
 };

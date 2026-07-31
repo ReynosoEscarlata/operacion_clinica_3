@@ -2,6 +2,7 @@ import type { Appointment, AppointmentStatus, EventType, Prisma, PrismaClient } 
 
 import { deniedByDoctorOwnership } from '../../lib/abac.js';
 import { AppError } from '../../lib/app-error.js';
+import { writeAuditLog } from '../../lib/audit-log.js';
 import type { Logger } from '../../lib/logger.js';
 import { getTenantId } from '../../lib/tenant-context.js';
 import { withTenant } from '../../lib/tenant-scoped.js';
@@ -106,6 +107,11 @@ const runTransition = async (
     trigger: metadata.trigger,
     ...metadata.eventPayload,
   });
+
+  // Fase 5 (ADR-013): único punto de escritura real para todo cambio de
+  // estado (cancel/complete/mark_no_show pasan por acá, no por el
+  // repositorio) -- un solo lugar para auditar, no uno por acción.
+  await writeAuditLog(tx, 'appointment.status_changed', 'appointment', appointmentId, 'success');
 
   logger.info(
     { appointmentId, from: current.status, to, trigger: metadata.trigger },

@@ -98,7 +98,7 @@ export const pollNoShowQueueOnce = async (deps: NoShowConsumerDeps): Promise<num
     try {
       const envelope = parseSystemJobEnvelope(JSON.parse(message.Body ?? '{}'));
       if (envelope.type === APPOINTMENT_NOSHOW_SCAN_EVENT_TYPE) {
-        await requestContextStorage.run({ requestId: `noshow-${Date.now()}` }, () =>
+        await requestContextStorage.run({ requestId: `noshow-${Date.now()}`, ip: '', userAgent: null }, () =>
           processNoShowJob({ executedAt: new Date().toISOString() }, deps),
         );
         processed += 1;

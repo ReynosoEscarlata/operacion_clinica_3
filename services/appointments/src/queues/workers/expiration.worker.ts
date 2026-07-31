@@ -62,7 +62,7 @@ export const buildExpirationEventHandler = (deps: ExpirationHandlerDeps): EventH
       ...(requestId ? { requestId } : {}),
     });
 
-    await requestContextStorage.run({ requestId: requestId ?? event.eventId }, () =>
+    await requestContextStorage.run({ requestId: requestId ?? event.eventId, ip: '', userAgent: null }, () =>
       runWithTenant(event.tenantId, () =>
         processExpirationJob({ appointmentId }, { findStatusById: deps.findStatusById, stateMachine: deps.stateMachine, logger: jobLogger }),
       ),

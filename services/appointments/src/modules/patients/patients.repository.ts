@@ -1,5 +1,6 @@
 import type { Appointment, Patient, PrismaClient } from '@prisma/client';
 
+import { writeAuditLog } from '../../lib/audit-log.js';
 import { writeOutboxEvent } from '../../lib/outbox.js';
 import { getTenantId } from '../../lib/tenant-context.js';
 import { withTenant } from '../../lib/tenant-scoped.js';
@@ -59,6 +60,7 @@ export class PrismaPatientRepository implements PatientRepository {
         email: patient.email,
         name: patient.name,
       });
+      await writeAuditLog(tx, 'patient.created', 'patient', patient.id, 'success');
 
       return patient;
     });
@@ -69,12 +71,22 @@ export class PrismaPatientRepository implements PatientRepository {
   }
 
   async findById(id: string): Promise<PatientWithAppointments | null> {
-    return withTenant(this.prisma, (tx) =>
-      tx.patient.findUnique({
+    return withTenant(this.prisma, async (tx) => {
+      const patient = await tx.patient.findUnique({
         where: { id },
         include: { appointments: { orderBy: { dateTime: 'desc' } } },
-      }),
-    );
+      });
+
+      // Fase 5 (ADR-013): lectura puntual de PII -- solo se audita cuando
+      // efectivamente hay un paciente que exponer (un 404 no revela nada).
+      // Va dentro de la misma transacción que la lectura: si el insert
+      // falla, la lectura completa falla y no se devuelve el dato.
+      if (patient) {
+        await writeAuditLog(tx, 'patient.read', 'patient', patient.id, 'success');
+      }
+
+      return patient;
+    });
   }
 
   async update(id: string, data: UpdatePatientData): Promise<Patient | null> {
@@ -93,6 +105,7 @@ export class PrismaPatientRepository implements PatientRepository {
         email: patient.email,
         name: patient.name,
       });
+      await writeAuditLog(tx, 'patient.updated', 'patient', patient.id, 'success');
 
       return patient;
     });

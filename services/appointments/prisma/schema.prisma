@@ -117,6 +117,31 @@ model OutboxEvent {
   @@index([publishedAt])
 }
 
+// Audit log inmutable (Fase 5, ADR-013): append-only por privilegio de
+// motor (app_role solo tiene SELECT/INSERT, ver migración SQL). Sin
+// hash-chaining (decisión consciente de ADR-013). tenantId NOT NULL, mismo
+// criterio que Patient/Appointment -- ninguna acción sobre PII de este
+// servicio ocurre sin un tenant ya resuelto (a diferencia de Auth, donde
+// las cuentas de plataforma sí pueden ser tenantId null).
+model AuditLog {
+  id            String   @id @default(uuid()) @db.Uuid
+  createdAt     DateTime @default(now())
+  tenantId      String   @db.Uuid
+  actorId       String?
+  actorRole     String?
+  action        String
+  resourceType  String
+  resourceId    String?
+  ip            String?
+  userAgent     String?
+  correlationId String?
+  result        String
+  justification String?
+
+  @@index([tenantId, createdAt])
+  @@index([resourceType, resourceId])
+}
+
 // Dead-letter para eventos de dominio consumidos (PaymentSucceeded/
 // PaymentFailed) que fallaron de forma permanente al procesarse — resuelve
 // el gap documentado en SPEC.md: sin esto, un evento "venenoso" se queda

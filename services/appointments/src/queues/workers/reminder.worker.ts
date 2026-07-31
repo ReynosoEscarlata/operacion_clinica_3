@@ -61,7 +61,7 @@ export const buildReminderEventHandler = (deps: ReminderHandlerDeps): EventHandl
       ...(requestId ? { requestId } : {}),
     });
 
-    await requestContextStorage.run({ requestId: requestId ?? event.eventId }, () =>
+    await requestContextStorage.run({ requestId: requestId ?? event.eventId, ip: '', userAgent: null }, () =>
       runWithTenant(event.tenantId, () =>
         processReminderJob({ appointmentId }, { ...deps, logger: jobLogger }),
       ),
