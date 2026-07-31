@@ -29,6 +29,41 @@ services:
       timeout: 5s
       retries: 5
 
+  # Fase 3b (ADR-014): emula SNS/SQS/EventBridge Scheduler en local, mismo
+  # principio que Postgres/Redis arriba -- se prueba contra infra real,
+  # nunca se mockea el SDK de AWS. Redis se retira de los 5 servicios
+  # progresivamente a medida que cada uno migra (ver commits de Fase 3b);
+  # queda arriba hasta que el último servicio (Appointments) deje de
+  # necesitarlo.
+  localstack:
+    image: localstack/localstack:3
+    restart: unless-stopped
+    ports:
+      - '4566:4566'
+    environment:
+      SERVICES: sns,sqs,scheduler,iam,sts
+    healthcheck:
+      test: ['CMD', 'curl', '-f', 'http://localhost:4566/_localstack/health']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # Job de un solo uso: crea el topic/colas/DLQs/schedule-group que
+  # scripts/localstack-setup.mjs define (mismos nombres/maxReceiveCount que
+  # infra/lib/stacks/messaging-stack.ts, duplicados a mano -- infra/ y
+  # scripts/ son proyectos npm separados). Termina y sale con código 0;
+  # `docker compose up` no lo mantiene corriendo.
+  localstack-setup:
+    build:
+      context: ./scripts
+      dockerfile: Dockerfile.localstack-setup
+    environment:
+      AWS_ENDPOINT_URL: http://localstack:4566
+      AWS_REGION: us-east-1
+    depends_on:
+      localstack:
+        condition: service_healthy
+
   # --- Servicios nuevos (Challenge 4, Fase 1 — esqueletos sin lógica de
   # negocio todavía, ver PLAN.md). El monolito de arriba (postgres, redis,
   # app del monolito vía `npm run dev`) sigue intacto: estrategia strangler
@@ -208,16 +243,22 @@ services:
       NODE_ENV: development
       PORT: 4005
       DATABASE_URL: postgresql://notifications:notifications@postgres-notifications:5432/notifications_db?schema=public
-      REDIS_URL: redis://redis:6379
       RESEND_API_KEY: ${RESEND_API_KEY:-re_dummy}
       RESEND_FROM_EMAIL: ${RESEND_FROM_EMAIL:-no-reply@clinica.example.com}
+      AWS_REGION: us-east-1
+      AWS_ENDPOINT_URL: http://localstack:4566
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      NOTIFICATIONS_DOMAIN_EVENTS_QUEUE_URL: http://sqs.us-east-1.localhost.localstack.cloud:4566/000000000000/clinica-test-notifications-domain-events
+      NOTIFICATIONS_DOMAIN_EVENTS_DLQ_URL: http://sqs.us-east-1.localhost.localstack.cloud:4566/000000000000/clinica-test-notifications-domain-events-dlq
+      NOTIFICATIONS_DOMAIN_EVENTS_MAX_RECEIVE_COUNT: '5'
     ports:
       - '4005:4005'
     depends_on:
       postgres-notifications:
         condition: service_healthy
-      redis:
-        condition: service_healthy
+      localstack-setup:
+        condition: service_completed_successfully
 
   gateway:
     build:

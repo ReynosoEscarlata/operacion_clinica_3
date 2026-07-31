@@ -18,9 +18,9 @@ export const buildNotificationLogRepository = (prisma: PrismaClient): Notificati
     });
   },
   // Idempotencia (PLAN.md Fase 3, punto 2: "mismo evento dos veces ≠ dos
-  // correos"). Redis Streams es at-least-once: el mismo evento puede
-  // entregarse de nuevo (ej. el proceso murió después de enviar el email
-  // pero antes del XACK). La clave de deduplicación es (appointmentId,
+  // correos"). SQS es at-least-once: el mismo evento puede entregarse de
+  // nuevo (ej. el proceso murió después de enviar el email pero antes de
+  // borrar el mensaje). La clave de deduplicación es (appointmentId,
   // type): cada tipo de email ocurre como máximo una vez en la vida de una
   // cita, porque la state machine de Appointments garantiza que cada
   // estado (PAID, CANCELLED, ...) se visita una sola vez.

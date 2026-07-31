@@ -1,0 +1,9 @@
+# Job de un solo uso (ver docker-compose.yml, servicio localstack-setup):
+# scripts/ es un proyecto npm standalone, no un workspace -- no hace falta
+# nada del wiring de workspaces que usan los Dockerfile de services/*.
+FROM node:20-alpine
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm install --omit=dev
+COPY localstack-setup.mjs ./
+CMD ["node", "localstack-setup.mjs"]

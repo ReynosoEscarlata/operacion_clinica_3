@@ -158,11 +158,11 @@ export class NotificationService {
     subject: string,
     body: string,
   ): Promise<void> {
-    // Idempotencia (PLAN.md Fase 3, punto 2): Redis Streams es
-    // at-least-once — el mismo AppointmentStatusChanged puede entregarse
-    // dos veces (ej. el proceso murió después de enviar el email pero
-    // antes del XACK, y el evento se reclama de nuevo). Sin este chequeo,
-    // el paciente recibiría el mismo email duplicado.
+    // Idempotencia (PLAN.md Fase 3, punto 2): SQS es at-least-once — el
+    // mismo AppointmentStatusChanged puede entregarse dos veces (ej. el
+    // proceso murió después de enviar el email pero antes de borrar el
+    // mensaje, y se reentrega tras expirar la visibilidad). Sin este
+    // chequeo, el paciente recibiría el mismo email duplicado.
     const alreadySent = await this.logs.wasAlreadySent(appointmentId, type);
     if (alreadySent) {
       this.logger.info(

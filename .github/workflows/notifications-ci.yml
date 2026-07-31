@@ -6,7 +6,9 @@ on:
     paths:
       - 'services/notifications/**'
       - 'packages/authz/**'
+      - 'packages/messaging/**'
       - 'packages/contracts/notifications/**'
+      - 'scripts/localstack-setup.mjs'
       - 'tsconfig.base.json'
       - '.github/workflows/notifications-ci.yml'
   pull_request:
@@ -14,7 +16,9 @@ on:
     paths:
       - 'services/notifications/**'
       - 'packages/authz/**'
+      - 'packages/messaging/**'
       - 'packages/contracts/notifications/**'
+      - 'scripts/localstack-setup.mjs'
       - 'tsconfig.base.json'
       - '.github/workflows/notifications-ci.yml'
 
@@ -37,24 +41,34 @@ jobs:
           --health-timeout 5s
           --health-retries 5
 
-      redis:
-        image: redis:7-alpine
+      # Fase 3b (ADR-014): emula SNS/SQS -- reemplaza el servicio redis que
+      # tenía este workflow.
+      localstack:
+        image: localstack/localstack:3
         ports:
-          - 6379:6379
+          - 4566:4566
+        env:
+          SERVICES: sns,sqs,scheduler
         options: >-
-          --health-cmd "redis-cli ping"
+          --health-cmd "curl -f http://localhost:4566/_localstack/health"
           --health-interval 5s
           --health-timeout 5s
-          --health-retries 5
+          --health-retries 10
 
     env:
       NODE_ENV: test
       PORT: 4005
       LOG_LEVEL: silent
       DATABASE_URL: postgresql://notifications:notifications@localhost:5432/notifications_db?schema=public
-      REDIS_URL: redis://localhost:6379
       RESEND_API_KEY: re_dummy
       RESEND_FROM_EMAIL: no-reply@clinica.example.com
+      AWS_REGION: us-east-1
+      AWS_ENDPOINT_URL: http://localhost:4566
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      NOTIFICATIONS_DOMAIN_EVENTS_QUEUE_URL: http://sqs.us-east-1.localhost.localstack.cloud:4566/000000000000/clinica-test-notifications-domain-events
+      NOTIFICATIONS_DOMAIN_EVENTS_DLQ_URL: http://sqs.us-east-1.localhost.localstack.cloud:4566/000000000000/clinica-test-notifications-domain-events-dlq
+      NOTIFICATIONS_DOMAIN_EVENTS_MAX_RECEIVE_COUNT: '5'
 
     steps:
       - name: Checkout
@@ -65,13 +79,25 @@ jobs:
         with:
           node-version: '20'
 
-      # Workspace: @clinica/authz no esta publicado, hay que instalar desde
-      # la raiz (ver build: convertir el repo en npm workspaces).
+      # Workspace: @clinica/authz y @clinica/messaging no están publicados,
+      # hay que instalar desde la raíz (ver build: convertir el repo en npm
+      # workspaces).
       - name: Install dependencies (workspace root)
-        run: npm install --workspace=services/notifications --workspace=packages/authz --include-workspace-root
+        run: npm install --workspace=services/notifications --workspace=packages/authz --workspace=packages/messaging --include-workspace-root
 
       - name: Build @clinica/authz
         run: npm run build --workspace=packages/authz
+
+      - name: Build @clinica/messaging
+        run: npm run build --workspace=packages/messaging
+
+      - name: Install scripts dependencies
+        working-directory: scripts
+        run: npm install
+
+      - name: Provision LocalStack (topic/colas/DLQs/schedule-group)
+        working-directory: scripts
+        run: npm run localstack:setup
 
       - name: Generate Prisma Client
         working-directory: services/notifications

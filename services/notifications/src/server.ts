@@ -1,11 +1,11 @@
+import { buildSqsClient, startDlqDrain, startQueueConsumer, type DeadLetterHandler } from '@clinica/messaging';
+
 import { buildApp } from './app.js';
 import { buildEmailChannel } from './clients/email-channel.js';
+import { buildAwsConfig } from './config/aws.js';
 import { env } from './config/env.js';
 import { prisma } from './config/prisma.js';
-import { redis } from './config/redis.js';
 import { initSentry, registerProcessErrorHandlers } from './config/sentry.js';
-import type { DeadLetterHandler } from './lib/event-consumer.js';
-import { startEventConsumer } from './lib/event-consumer.js';
 import { buildEventHandlers } from './lib/event-handlers.js';
 import { logger } from './lib/logger.js';
 import { buildDeadLetterRepository } from './modules/notifications/dead-letter.repository.js';
@@ -39,27 +39,37 @@ const start = async (): Promise<void> => {
     );
   };
 
-  // Consume del mismo stream compartido que Appointments, pero con su
-  // propio consumer group: Redis Streams permite que varios servicios lean
-  // independientemente los mismos eventos — cada uno con su propio offset
-  // y reintentos.
-  const consumerRedis = redis.duplicate();
-  const stopEventConsumer = startEventConsumer({
-    redis: consumerRedis,
-    groupName: 'notifications',
-    consumerName: `notifications-${process.pid}`,
+  // Fase 3b (ADR-014): consume su propia cola SQS suscrita al topic SNS
+  // compartido (`domain-events`) -- reemplaza el consumer group propio que
+  // tenía sobre el stream de Redis. El drenado de la DLQ física es una red
+  // de seguridad secundaria (ver packages/messaging/src/dlq-drain.ts): el
+  // camino esperado para "agotó reintentos" ya pasa por onDeadLetter dentro
+  // del consumer principal, con el error real en mano.
+  const sqsClient = buildSqsClient(buildAwsConfig());
+
+  const stopEventConsumer = startQueueConsumer({
+    sqsClient,
+    queueUrl: env.NOTIFICATIONS_DOMAIN_EVENTS_QUEUE_URL,
+    maxReceiveCount: env.NOTIFICATIONS_DOMAIN_EVENTS_MAX_RECEIVE_COUNT,
     logger,
     handlers: buildEventHandlers(notificationService),
     onDeadLetter,
   });
 
+  const stopDlqDrain = startDlqDrain({
+    sqsClient,
+    dlqUrl: env.NOTIFICATIONS_DOMAIN_EVENTS_DLQ_URL,
+    maxReceiveCount: env.NOTIFICATIONS_DOMAIN_EVENTS_MAX_RECEIVE_COUNT,
+    logger,
+    onDrain: onDeadLetter,
+  });
+
   const shutdown = async (signal: string): Promise<void> => {
     logger.info({ signal }, 'Iniciando apagado del servicio');
     stopEventConsumer();
-    consumerRedis.disconnect();
+    stopDlqDrain();
     await app.close();
     await prisma.$disconnect();
-    redis.disconnect();
     logger.info({ signal }, 'Servicio apagado correctamente');
     process.exit(0);
   };

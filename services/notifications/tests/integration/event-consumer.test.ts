@@ -1,33 +1,41 @@
 import { randomUUID } from 'node:crypto';
 
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { SendMessageCommand } from '@aws-sdk/client-sqs';
+import { buildSqsClient, pollQueueOnce } from '@clinica/messaging';
+import { afterAll, describe, expect, it, vi } from 'vitest';
 
 import type { NotificationChannel } from '../../src/clients/notification-channel.js';
+import { buildAwsConfig } from '../../src/config/aws.js';
+import { env } from '../../src/config/env.js';
 import { prisma } from '../../src/config/prisma.js';
-import { redis } from '../../src/config/redis.js';
-import { ensureConsumerGroup, runConsumerBatchOnce, type EventHandler } from '../../src/lib/event-consumer.js';
-import { DOMAIN_EVENTS_STREAM } from '../../src/lib/outbox-relay.js';
+import type { EventHandler } from '../../src/lib/handler-types.js';
 import { logger } from '../../src/lib/logger.js';
 import { buildNotificationLogRepository } from '../../src/modules/notifications/notification-log.repository.js';
 import { buildNotificationService } from '../../src/modules/notifications/notification.service.js';
 import { buildSnapshotsRepository } from '../../src/modules/notifications/snapshots.repository.js';
 
-const GROUP = `test-group-${randomUUID()}`;
+// Publica directo a la cola SQS de Notifications, como si SNS ya hubiera
+// hecho el fan-out (rawMessageDelivery) -- simula "lo que llega", no un
+// test end-to-end del publisher (mismo patrón que ya usaban los tests
+// equivalentes de Appointments contra Redis Streams).
+const sqsClient = buildSqsClient(buildAwsConfig());
 
-const publishToStream = async (type: string, payload: Record<string, unknown>): Promise<void> => {
-  await redis.xadd(
-    DOMAIN_EVENTS_STREAM,
-    '*',
-    'eventId',
-    randomUUID(),
-    'type',
-    type,
-    'payload',
-    JSON.stringify(payload),
+const publishToQueue = async (type: string, payload: Record<string, unknown>): Promise<void> => {
+  await sqsClient.send(
+    new SendMessageCommand({
+      QueueUrl: env.NOTIFICATIONS_DOMAIN_EVENTS_QUEUE_URL,
+      MessageBody: JSON.stringify({
+        eventId: randomUUID(),
+        tenantId: randomUUID(),
+        type,
+        payload,
+        publishedAt: new Date().toISOString(),
+      }),
+    }),
   );
 };
 
-describe('Consumer de eventos de dominio (Notifications, Postgres + Redis reales)', () => {
+describe('Consumer de eventos de dominio (Notifications, Postgres + SQS reales vía LocalStack)', () => {
   const fakeChannel: NotificationChannel = { name: 'email', send: vi.fn().mockResolvedValue(undefined) };
   const notificationService = buildNotificationService({
     snapshots: buildSnapshotsRepository(prisma),
@@ -43,13 +51,8 @@ describe('Consumer de eventos de dominio (Notifications, Postgres + Redis reales
     PatientUpdated: (event) => notificationService.handlePatientUpdated(event.payload as never),
   };
 
-  beforeAll(async () => {
-    await ensureConsumerGroup(redis, GROUP, '$');
-  });
-
   afterAll(async () => {
     await prisma.$disconnect();
-    redis.disconnect();
   });
 
   it('reconstruye el read-model y envía el email de confirmación cuando la cita pasa a PAID', async () => {
@@ -57,20 +60,24 @@ describe('Consumer de eventos de dominio (Notifications, Postgres + Redis reales
     const patientId = randomUUID();
     const dateTime = new Date(Date.now() + 86_400_000).toISOString();
 
-    await publishToStream('PatientUpdated', { patientId, email: 'consumer-test@example.com', name: 'Test' });
-    await publishToStream('AppointmentCreated', { appointmentId, patientId, doctorId: randomUUID(), dateTime });
-    await publishToStream('AppointmentStatusChanged', {
+    await publishToQueue('PatientUpdated', { patientId, email: 'consumer-test@example.com', name: 'Test' });
+    await publishToQueue('AppointmentCreated', { appointmentId, patientId, doctorId: randomUUID(), dateTime });
+    await publishToQueue('AppointmentStatusChanged', {
       appointmentId,
       from: 'CONFIRMED',
       to: 'PAID',
       trigger: 'webhook',
     });
 
-    // Tres eventos en orden: cada XREADGROUP trae lo que haya disponible,
-    // así que se procesa en lotes hasta vaciar lo publicado arriba.
     let processed = 0;
     for (let i = 0; i < 5 && processed < 3; i += 1) {
-      processed += await runConsumerBatchOnce({ redis, groupName: GROUP, consumerName: 'c1', logger, handlers }, 200);
+      processed += await pollQueueOnce({
+        sqsClient,
+        queueUrl: env.NOTIFICATIONS_DOMAIN_EVENTS_QUEUE_URL,
+        logger,
+        handlers,
+        waitTimeSeconds: 2,
+      });
     }
 
     expect(processed).toBeGreaterThanOrEqual(3);
@@ -94,24 +101,30 @@ describe('Consumer de eventos de dominio (Notifications, Postgres + Redis reales
     const patientId = randomUUID();
     const dateTime = new Date(Date.now() + 86_400_000).toISOString();
 
-    await publishToStream('PatientUpdated', {
+    await publishToQueue('PatientUpdated', {
       patientId,
       email: `idempotente-${randomUUID()}@example.com`,
       name: 'Idempotente',
     });
-    await publishToStream('AppointmentCreated', { appointmentId, patientId, doctorId: randomUUID(), dateTime });
+    await publishToQueue('AppointmentCreated', { appointmentId, patientId, doctorId: randomUUID(), dateTime });
 
     const sendCallsBefore = (fakeChannel.send as ReturnType<typeof vi.fn>).mock.calls.length;
 
     // Publica el MISMO AppointmentStatusChanged dos veces — simula la
-    // re-entrega at-least-once de Redis Streams (ej. el proceso murió
-    // después de enviar el email pero antes del XACK).
-    await publishToStream('AppointmentStatusChanged', { appointmentId, from: 'CONFIRMED', to: 'PAID', trigger: 'webhook' });
-    await publishToStream('AppointmentStatusChanged', { appointmentId, from: 'CONFIRMED', to: 'PAID', trigger: 'webhook' });
+    // re-entrega at-least-once de SQS (ej. el proceso murió después de
+    // enviar el email pero antes de borrar el mensaje).
+    await publishToQueue('AppointmentStatusChanged', { appointmentId, from: 'CONFIRMED', to: 'PAID', trigger: 'webhook' });
+    await publishToQueue('AppointmentStatusChanged', { appointmentId, from: 'CONFIRMED', to: 'PAID', trigger: 'webhook' });
 
     let processed = 0;
     for (let i = 0; i < 6 && processed < 4; i += 1) {
-      processed += await runConsumerBatchOnce({ redis, groupName: GROUP, consumerName: 'c1', logger, handlers }, 200);
+      processed += await pollQueueOnce({
+        sqsClient,
+        queueUrl: env.NOTIFICATIONS_DOMAIN_EVENTS_QUEUE_URL,
+        logger,
+        handlers,
+        waitTimeSeconds: 2,
+      });
     }
 
     const sendCallsAfter = (fakeChannel.send as ReturnType<typeof vi.fn>).mock.calls.length;

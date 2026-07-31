@@ -1,5 +1,5 @@
 import type { NotificationService } from '../modules/notifications/notification.service.js';
-import type { EventHandler } from './event-consumer.js';
+import type { EventHandler } from './handler-types.js';
 
 // Mapa type → handler compartido entre el consumer real (server.ts) y el
 // retry manual de dead-letter (modules/admin): reintentar una entrada no

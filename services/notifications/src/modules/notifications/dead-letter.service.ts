@@ -1,7 +1,7 @@
 import type { DeadLetterEntry } from '@prisma/client';
 
 import { AppError } from '../../lib/app-error.js';
-import type { EventHandler } from '../../lib/event-consumer.js';
+import type { EventHandler } from '../../lib/handler-types.js';
 import type { DeadLetterRepository } from './dead-letter.repository.js';
 
 export class DeadLetterService {
@@ -14,11 +14,11 @@ export class DeadLetterService {
     return this.repository.list();
   }
 
-  // Reintentar acá no republica nada a Redis Streams (Notifications es
-  // consumer, no dueño de estos eventos) — re-ejecuta el mismo handler que
-  // hubiera corrido el consumer real, con el payload que quedó guardado en
-  // la entrada de dead-letter. Si vuelve a fallar, la entrada NO se borra
-  // (se puede reintentar de nuevo) y se relanza el error tal cual.
+  // Reintentar acá no republica nada a SNS/SQS (Notifications es consumer,
+  // no dueño de estos eventos) — re-ejecuta el mismo handler que hubiera
+  // corrido el consumer real, con el payload que quedó guardado en la
+  // entrada de dead-letter. Si vuelve a fallar, la entrada NO se borra (se
+  // puede reintentar de nuevo) y se relanza el error tal cual.
   async retry(id: string): Promise<void> {
     const entry = await this.repository.findById(id);
     if (!entry) {

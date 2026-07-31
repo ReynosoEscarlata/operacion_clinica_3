@@ -1,79 +1,79 @@
 import { randomUUID } from 'node:crypto';
 
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { CreateQueueCommand, DeleteQueueCommand, SendMessageCommand } from '@aws-sdk/client-sqs';
+import { buildSqsClient, pollQueueOnce, type DeadLetterHandler } from '@clinica/messaging';
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { buildAwsConfig } from '../../src/config/aws.js';
 import { prisma } from '../../src/config/prisma.js';
-import { redis } from '../../src/config/redis.js';
-import {
-  ensureConsumerGroup,
-  runConsumerBatchOnce,
-  type DeadLetterHandler,
-  type EventHandler,
-} from '../../src/lib/event-consumer.js';
-import { DOMAIN_EVENTS_STREAM } from '../../src/lib/outbox-relay.js';
+import type { EventHandler } from '../../src/lib/handler-types.js';
 import { logger } from '../../src/lib/logger.js';
 
-const GROUP = `test-dlq-${randomUUID()}`;
+const sqsClient = buildSqsClient(buildAwsConfig());
 
-const publishToStream = async (type: string, payload: Record<string, unknown>): Promise<void> => {
-  await redis.xadd(
-    DOMAIN_EVENTS_STREAM,
-    '*',
-    'eventId',
-    randomUUID(),
-    'type',
-    type,
-    'payload',
-    JSON.stringify(payload),
-  );
-};
+describe('Dead-letter de eventos de dominio (Notifications, SQS real vía LocalStack)', () => {
+  let queueUrl: string;
 
-const wait = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+  beforeEach(async () => {
+    // VisibilityTimeout bajo para no esperar de verdad entre reintentos.
+    const queue = await sqsClient.send(
+      new CreateQueueCommand({ QueueName: `test-notifications-dlq-${randomUUID()}`, Attributes: { VisibilityTimeout: '1' } }),
+    );
+    queueUrl = queue.QueueUrl as string;
+  });
 
-describe('Dead-letter de eventos de dominio (Notifications, Redis Streams real)', () => {
-  beforeAll(async () => {
-    await ensureConsumerGroup(redis, GROUP, '$');
+  afterEach(async () => {
+    await sqsClient.send(new DeleteQueueCommand({ QueueUrl: queueUrl })).catch(() => undefined);
   });
 
   afterAll(async () => {
     await prisma.$disconnect();
-    redis.disconnect();
   });
 
-  it('un evento que siempre falla agota sus reintentos y se envía a dead-letter', async () => {
+  it('un evento que siempre falla agota sus reintentos y se envía a dead-letter con el error real', async () => {
     const alwaysFails: EventHandler = async () => {
       throw new Error('handler roto a propósito');
     };
     const onDeadLetter: DeadLetterHandler = vi.fn().mockResolvedValue(undefined);
 
-    await publishToStream('SomeEvent', { marker: 'dlq-test' });
+    await sqsClient.send(
+      new SendMessageCommand({
+        QueueUrl: queueUrl,
+        MessageBody: JSON.stringify({
+          eventId: randomUUID(),
+          tenantId: randomUUID(),
+          type: 'SomeEvent',
+          payload: { marker: 'dlq-test' },
+          publishedAt: new Date().toISOString(),
+        }),
+      }),
+    );
 
     const deps = {
-      redis,
-      groupName: GROUP,
-      consumerName: 'dlq-consumer',
+      sqsClient,
+      queueUrl,
       logger,
-      handlers: { SomeEvent: alwaysFails },
+      handlers: { SomeEvent: alwaysFails as never },
       onDeadLetter,
-      maxAttempts: 2,
-      minIdleMs: 20,
+      maxReceiveCount: 2,
     };
 
-    await runConsumerBatchOnce(deps, 200);
+    // Primer receive (ApproximateReceiveCount=1): por debajo del máximo, no
+    // se manda a dead-letter todavía.
+    await pollQueueOnce({ ...deps, waitTimeSeconds: 2 });
     expect(onDeadLetter).not.toHaveBeenCalled();
 
-    await wait(30);
-    await runConsumerBatchOnce(deps, 200);
+    // Espera a que expire la visibilidad (1s) para que SQS reentregue el
+    // mismo mensaje con ApproximateReceiveCount=2 -- el último intento
+    // permitido.
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    await pollQueueOnce({ ...deps, waitTimeSeconds: 2 });
+
     expect(onDeadLetter).toHaveBeenCalledTimes(1);
     expect(onDeadLetter).toHaveBeenCalledWith(
       expect.objectContaining({ type: 'SomeEvent', payload: { marker: 'dlq-test' } }),
       expect.any(Error),
       2,
     );
-
-    const pendingSummary = (await redis.xpending(DOMAIN_EVENTS_STREAM, GROUP)) as
-      | [number, string | null, string | null, unknown]
-      | null;
-    expect(pendingSummary?.[0] ?? 0).toBe(0);
   });
 });

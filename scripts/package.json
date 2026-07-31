@@ -4,9 +4,13 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "loadtest": "node loadtest.mjs"
+    "loadtest": "node loadtest.mjs",
+    "localstack:setup": "node localstack-setup.mjs"
   },
   "dependencies": {
+    "@aws-sdk/client-scheduler": "^3.687.0",
+    "@aws-sdk/client-sns": "^3.687.0",
+    "@aws-sdk/client-sqs": "^3.687.0",
     "autocannon": "^8.0.0"
   }
 }

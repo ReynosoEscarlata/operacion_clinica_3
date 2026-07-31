@@ -20,13 +20,14 @@
     "schema": "prisma/schema.prisma"
   },
   "dependencies": {
+    "@aws-sdk/client-sqs": "^3.687.0",
     "@clinica/authz": "^0.1.0",
+    "@clinica/messaging": "^0.1.0",
     "@fastify/cors": "^9.0.1",
     "@prisma/client": "^5.20.0",
     "@sentry/node": "^7.119.0",
     "@sinclair/typebox": "^0.32.35",
     "fastify": "^4.28.1",
-    "ioredis": "^5.4.1",
     "pino": "^9.4.0",
     "pino-pretty": "^11.2.2",
     "prom-client": "^15.1.3",
