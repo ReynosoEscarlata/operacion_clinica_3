@@ -16,6 +16,8 @@ export const AUDIT_ACTIONS = [
   'payment.webhook_processed',
   'support_access.granted',
   'dead_letter.read',
+  'dead_letter.retried',
+  'dead_letter.removed',
   'arco.access_requested',
   'arco.cancellation_requested',
   'arco.opposition_requested',
