@@ -22,10 +22,16 @@ export class IdentityStack extends Stack {
     const { config } = props;
     const prefix = `clinica-${config.envName}`;
 
-    // Stub: la logica real de leer tenant_id/rol del usuario e inyectarlos
-    // como claims del JWT se implementa en la Fase 3/4, cuando exista el
-    // modelo de datos de tenancy (RFC-003) y el motor de permisos
-    // (packages/authz/, ADR-012). Aqui solo se aprovisiona el enganche.
+    // Fase 4 (RFC-004/RFC-003/ADR-012): lee los atributos custom del usuario
+    // (poblados al aprovisionar la cuenta, fuera del alcance de este stack)
+    // y los inyecta como claims del JWT -- mismo shape que
+    // services/auth/src/lib/jwt.ts firma localmente hoy (role/tenant_id/
+    // doctor_id en snake_case, formato @clinica/authz), para que el
+    // gateway (gateway/src/middleware/verify-jwt.ts) no necesite distinguir
+    // si el JWT vino de Cognito o del emisor local el día que se migre.
+    // Solo infra: services/auth NO consume Cognito todavía (decisión de
+    // Fase 4, "solo completar infra") -- este Lambda no se despliega ni se
+    // conecta a ningún flujo de login real en esta sesión.
     const preTokenGenerationFn = new lambda.Function(this, 'PreTokenGenerationFn', {
       functionName: `${prefix}-cognito-pre-token-generation`,
       runtime: lambda.Runtime.NODEJS_22_X,
@@ -33,10 +39,26 @@ export class IdentityStack extends Stack {
       timeout: Duration.seconds(5),
       code: lambda.Code.fromInline(
         `exports.handler = async (event) => {
-  // TODO (Fase 3/4): leer tenant_id y rol del usuario (RFC-003/RFC-004) e
-  // inyectarlos en event.response.claimsOverrideDetails.claimsToAddOrOverride.
-  // Placeholder intencional: no se inventa logica de negocio en la Fase 2
-  // de infra pura.
+  const attrs = event.request.userAttributes || {};
+  const role = attrs['custom:role'];
+  const tenantId = attrs['custom:tenant_id'];
+  const doctorId = attrs['custom:doctor_id'];
+
+  // Cognito no acepta null en claimsToAddOrOverride -- se omite el claim
+  // por completo en vez de forzar un valor vacío (el gateway ya trata
+  // "claim ausente" igual que "claim null", ver verify-jwt.ts). Un
+  // platform_admin/platform_support real nunca tiene custom:tenant_id
+  // seteado (RFC-003: NULL identifica exclusivamente roles de plataforma),
+  // así que tenant_id queda ausente para esos usuarios, igual que hoy hace
+  // signAccessToken() localmente.
+  const claimsToAddOrOverride = {};
+  if (role) claimsToAddOrOverride.role = role;
+  if (tenantId) claimsToAddOrOverride.tenant_id = tenantId;
+  if (doctorId) claimsToAddOrOverride.doctor_id = doctorId;
+
+  event.response = event.response || {};
+  event.response.claimsOverrideDetails = { claimsToAddOrOverride };
+
   return event;
 };`,
       ),
@@ -56,6 +78,11 @@ export class IdentityStack extends Stack {
         // platform_support (no hay "null" explicito, se omite el atributo).
         tenant_id: new cognito.StringAttribute({ mutable: true }),
         role: new cognito.StringAttribute({ mutable: true }),
+        // RFC-004, filtro ABAC de propiedad ("un doctor solo ve sus propias
+        // citas"): mismo campo que User.doctorId en services/auth/prisma/
+        // schema.prisma -- referencia por id a Doctor en services/doctors,
+        // sin FK real (RFC-001). Solo se setea para usuarios con role=doctor.
+        doctor_id: new cognito.StringAttribute({ mutable: true }),
       },
       passwordPolicy: {
         minLength: 12,
