@@ -21,6 +21,7 @@ export interface FoundationStackProps extends StackProps {
 export class FoundationStack extends Stack {
   public readonly budgetAlarmTopic: sns.Topic;
   public readonly operationalAlarmTopic: sns.Topic;
+  public readonly securityAlarmTopic: sns.Topic;
 
   constructor(scope: Construct, id: string, props: FoundationStackProps) {
     super(scope, id, props);
@@ -77,6 +78,17 @@ export class FoundationStack extends Stack {
     this.operationalAlarmTopic = new sns.Topic(this, 'OperationalAlarmTopic', {
       topicName: `clinica-${config.envName}-operational-alerts`,
       displayName: `Alertas operativas — ${config.envName}`,
+    });
+
+    // Topic de seguridad (Fase 6, ADR-017) -- misma lógica que ya separó
+    // budgetAlarmTopic de operationalAlarmTopic: un acceso cross-tenant
+    // confirmado es un posible incidente LFPDPPP (Ley Federal de Protección
+    // de Datos Personales en Posesión de los Particulares), audiencia
+    // distinta de "algo se cayó" (guardia técnica). Se suscribe a mano
+    // post-deploy, igual que budgetAlarmTopic (infra/README.md).
+    this.securityAlarmTopic = new sns.Topic(this, 'SecurityAlarmTopic', {
+      topicName: `clinica-${config.envName}-security-alerts`,
+      displayName: `Alertas de seguridad — ${config.envName}`,
     });
 
     new budgets.CfnBudget(this, 'MonthlyBudget', {

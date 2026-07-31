@@ -9,6 +9,7 @@ import * as snsActions from 'aws-cdk-lib/aws-cloudwatch-actions';
 import * as sqs from 'aws-cdk-lib/aws-sqs';
 import * as cloudwatch from 'aws-cdk-lib/aws-cloudwatch';
 import { Construct } from 'constructs';
+import { AlarmWithRunbook } from './alarm-with-runbook.js';
 
 export interface ClinicServiceProps {
   serviceName: string;
@@ -166,13 +167,15 @@ export class ClinicService extends Construct {
     // 5 servicios no se exponen detras del ALB publico (el gateway es el
     // unico punto de entrada, RFC-001 del Challenge 4). Esa alarma se crea en
     // edge-stack.ts, solo para el target group del gateway.
-    const cpuAlarm = new cloudwatch.Alarm(this, 'HighCpuAlarm', {
+    const cpuAlarm = new AlarmWithRunbook(this, 'HighCpuAlarm', {
+      runbook: 'alarma-saturacion-fargate.md',
       alarmName: `clinica-${props.serviceName}-high-cpu`,
+      alarmDescription: `CPU de ${props.serviceName} sobre 85% por 3 periodos seguidos`,
       metric: this.service.metricCpuUtilization(),
       threshold: 85,
       evaluationPeriods: 3,
       comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
-    });
+    }).alarm;
 
     if (props.alarmTopic) {
       cpuAlarm.addAlarmAction(new snsActions.SnsAction(props.alarmTopic));

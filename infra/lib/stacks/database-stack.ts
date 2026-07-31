@@ -1,14 +1,32 @@
 import { Stack, type StackProps, Duration, RemovalPolicy } from 'aws-cdk-lib';
+import * as cloudwatch from 'aws-cdk-lib/aws-cloudwatch';
+import * as snsActions from 'aws-cdk-lib/aws-cloudwatch-actions';
 import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import * as rds from 'aws-cdk-lib/aws-rds';
 import * as kms from 'aws-cdk-lib/aws-kms';
+import * as sns from 'aws-cdk-lib/aws-sns';
 import type { Construct } from 'constructs';
 import { SERVICE_NAMES, type EnvironmentConfig, type ServiceName } from '../../config/environments.js';
+import { AlarmWithRunbook } from '../constructs/alarm-with-runbook.js';
 
 export interface DatabaseStackProps extends StackProps {
   config: EnvironmentConfig;
   vpc: ec2.Vpc;
+  // Fase 6 (ADR-017): Foundation no depende de Database, así que pasarlo
+  // desde bin/infra.ts no crea un ciclo -- mismo criterio ya usado para
+  // Compute/Edge.
+  alarmTopic: sns.ITopic;
 }
+
+const RDS_CPU_THRESHOLD_PERCENT = 80;
+// Espacio libre mínimo como % del almacenamiento asignado -- convertido a
+// bytes por instancia más abajo (cada servicio puede tener un
+// allocatedStorageGb distinto en el futuro, aunque hoy todos comparten 20GB).
+const RDS_FREE_STORAGE_MIN_PERCENT = 10;
+// DBLoad (Performance Insights, ya habilitado) sobre el conteo de vCPUs de
+// db.t4g.micro es la guía estándar de AWS para "la instancia está saturada
+// de CPU/IO" -- 2 vCPUs en esta clase de instancia.
+const RDS_DB_LOAD_THRESHOLD_VCPUS = 2;
 
 export class DatabaseStack extends Stack {
   public readonly databases: Record<ServiceName, rds.DatabaseInstance>;
@@ -82,6 +100,60 @@ export class DatabaseStack extends Stack {
       // de rotacion gestionada por Secrets Manager que el resto del sistema
       // de credenciales deberia seguir).
       instance.addRotationSingleUser({ automaticallyAfter: Duration.days(30) });
+
+      const alarmAction = new snsActions.SnsAction(props.alarmTopic);
+      const rdsRunbook = 'alarma-rds.md';
+
+      new AlarmWithRunbook(this, `${serviceName}DbCpuAlarm`, {
+        runbook: rdsRunbook,
+        alarmName: `clinica-${config.envName}-rds-${serviceName}-cpu`,
+        alarmDescription: `CPU de la RDS de ${serviceName} sobre ${RDS_CPU_THRESHOLD_PERCENT}%`,
+        metric: instance.metricCPUUtilization(),
+        threshold: RDS_CPU_THRESHOLD_PERCENT,
+        evaluationPeriods: 3,
+        comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
+      }).alarm.addAlarmAction(alarmAction);
+
+      const freeStorageThresholdBytes = sizing.allocatedStorageGb * 1024 * 1024 * 1024 * (RDS_FREE_STORAGE_MIN_PERCENT / 100);
+      new AlarmWithRunbook(this, `${serviceName}DbFreeStorageAlarm`, {
+        runbook: rdsRunbook,
+        alarmName: `clinica-${config.envName}-rds-${serviceName}-free-storage`,
+        alarmDescription: `Espacio libre de la RDS de ${serviceName} bajo ${RDS_FREE_STORAGE_MIN_PERCENT}% del almacenamiento asignado`,
+        metric: instance.metricFreeStorageSpace(),
+        threshold: freeStorageThresholdBytes,
+        evaluationPeriods: 1,
+        comparisonOperator: cloudwatch.ComparisonOperator.LESS_THAN_THRESHOLD,
+      }).alarm.addAlarmAction(alarmAction);
+
+      new AlarmWithRunbook(this, `${serviceName}DbConnectionsAlarm`, {
+        runbook: rdsRunbook,
+        alarmName: `clinica-${config.envName}-rds-${serviceName}-conexiones`,
+        alarmDescription: `Conexiones activas de la RDS de ${serviceName} sobre ${sizing.maxConnectionsAlarmThreshold} (umbral NO VERIFICADO, ver environments.ts)`,
+        metric: instance.metricDatabaseConnections(),
+        threshold: sizing.maxConnectionsAlarmThreshold,
+        evaluationPeriods: 3,
+        comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
+      }).alarm.addAlarmAction(alarmAction);
+
+      // DBLoad no tiene un método helper en la L2 -- se referencia a mano
+      // sobre el namespace AWS/RDS (requiere Performance Insights, ya
+      // habilitado arriba).
+      const dbLoadMetric = new cloudwatch.Metric({
+        namespace: 'AWS/RDS',
+        metricName: 'DBLoad',
+        dimensionsMap: { DBInstanceIdentifier: instance.instanceIdentifier },
+        period: Duration.minutes(5),
+        statistic: 'Average',
+      });
+      new AlarmWithRunbook(this, `${serviceName}DbLoadAlarm`, {
+        runbook: rdsRunbook,
+        alarmName: `clinica-${config.envName}-rds-${serviceName}-dbload`,
+        alarmDescription: `DBLoad de ${serviceName} sobre ${RDS_DB_LOAD_THRESHOLD_VCPUS} vCPUs (Performance Insights) por 3 periodos`,
+        metric: dbLoadMetric,
+        threshold: RDS_DB_LOAD_THRESHOLD_VCPUS,
+        evaluationPeriods: 3,
+        comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
+      }).alarm.addAlarmAction(alarmAction);
 
       databases[serviceName] = instance;
     }

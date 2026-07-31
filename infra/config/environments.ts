@@ -19,6 +19,13 @@ export interface RdsSizing {
   // el stack, para poder activarlo puntualmente por servicio si la Fase 7
   // (RFC-disaster-recovery) lo justifica — un cambio de config, no de código.
   multiAz: boolean;
+  // Fase 6 (ADR-017) -- NO VERIFICADO: `max_connections` real de
+  // db.t4g.micro es una fórmula sobre memoria disponible (parameter group
+  // `LEAST({DBInstanceClassMemory/9531392},5000)`), no una constante fija.
+  // Este valor es un knob de config conservador (no inventado como umbral
+  // "seguro" definitivo) hasta confirmar el número real con
+  // `SHOW max_connections;` contra una instancia desplegada.
+  maxConnectionsAlarmThreshold: number;
 }
 
 export interface FargateSizing {
@@ -58,6 +65,7 @@ const defaultRdsSizing = (multiAz: boolean, allocatedStorageGb = 20): RdsSizing 
   instanceSize: 'micro',
   allocatedStorageGb,
   multiAz,
+  maxConnectionsAlarmThreshold: 80,
 });
 
 const defaultFargateSizing = (desiredCount: number): FargateSizing => ({
