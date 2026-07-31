@@ -96,7 +96,10 @@ const buildFargateConfig = (desiredCount: number): Record<ServiceName, FargateSi
 // decisión de validación del plan de Fase 2. El deploy real usa
 // CDK_DEFAULT_ACCOUNT/CDK_DEFAULT_REGION del entorno de quien ejecuta `cdk deploy`.
 const PLACEHOLDER_ACCOUNT = '000000000000';
-const REGION = 'mx-central-1';
+// ADR-018 (reemplaza ADR-010): us-east-1, no mx-central-1 -- ver el ADR para
+// el motivo y las consecuencias de compliance (transferencia internacional
+// de datos de salud, justificada en docs/compliance/aviso-de-privacidad.md).
+const REGION = 'us-east-1';
 
 export const ENVIRONMENTS: Record<'dev' | 'staging' | 'prod', EnvironmentConfig> = {
   dev: {

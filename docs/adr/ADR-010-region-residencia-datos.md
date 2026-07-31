@@ -1,7 +1,7 @@
 # ADR-010: Región AWS y residencia de datos (LFPDPPP)
 
 **Fecha:** 2026-07-29
-**Estado:** Aceptado (2026-07-29)
+**Estado:** Reemplazado por ADR-018 (2026-07-31)
 **Decisor(es):** Ricardo Reynoso
 
 ## Contexto
@@ -66,3 +66,9 @@ la nota de esa misma investigación).
   `mx-central-1`)
 - `claude/PLAN-challenge-5-plataforma-para-todos.md`, sección 2 (D4) y Fase 5 (contexto legal
   LFPDPPP)
+
+## Changelog
+- 2026-07-31: reemplazado por `ADR-018-cambio-region-us-east-1.md` — Ricardo confirmó que la
+  cuenta/región disponible para el primer despliegue real es `us-east-1`, no `mx-central-1`. El
+  contenido de este ADR (Contexto, Opciones, Decisión, Consecuencias) queda sin modificar como
+  registro histórico de por qué se eligió `mx-central-1` originalmente.

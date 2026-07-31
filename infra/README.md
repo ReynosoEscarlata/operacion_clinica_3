@@ -1,8 +1,8 @@
 # Infraestructura — Challenge 5, Fase 2
 
 CDK en TypeScript (ADR-008) que aprovisiona la fundación AWS para los 5 servicios existentes
-(`auth`, `appointments`, `doctors`, `payments`, `notifications`) + `gateway`, en `mx-central-1`
-(ADR-010).
+(`auth`, `appointments`, `doctors`, `payments`, `notifications`) + `gateway`, en `us-east-1`
+(ADR-018, reemplaza ADR-010/`mx-central-1`).
 
 **Estado:** código generado y validado con `cdk synth`. **Nada se ha desplegado.** El deploy real
 lo ejecuta un humano — ver guardrails de `CLAUDE.md` ("NUNCA despliegues a AWS").
@@ -74,18 +74,21 @@ npx cdk synth -c env=dev --validation=false
 Los 9 templates se generan correctamente en los 3 entornos. El linter reporta además, como
 **warnings informativos** (no bloqueantes, y no relacionados con el flag anterior):
 
-- `AWS::Budgets::Budget` marcado como "no existe en mx-central-1" por el linter — Budgets es un
-  servicio con particularidades de región (su API vive históricamente en `us-east-1`); **no
-  verificado** si el recurso de CloudFormation funciona igual en `mx-central-1` — confirmar en
-  consola antes del primer deploy real (ver preguntas abiertas).
-- Advertencia de "no hardcodear AZs" — es intencional: se hardcodeó `mx-central-1a/b/c` en
+- Advertencia de "no hardcodear AZs" — es intencional: se hardcodea `${region}a/b/c` en
   `network-stack.ts` para que `cdk synth` no necesite hacer un lookup de contexto contra AWS real
-  (que fallaría sin credenciales). **Re-verificar los nombres reales de AZ de `mx-central-1`
-  contra la consola antes del primer deploy.**
+  (que fallaría sin credenciales). Tras ADR-018 (región `us-east-1`, reemplaza `mx-central-1`) esto
+  ya no es una incertidumbre real — `us-east-1a/b/c` es la nomenclatura estándar y estable de una
+  de las regiones más antiguas de AWS, a diferencia de la duda genuina que existía sobre
+  `mx-central-1` (región nueva, ver el ADR-010 original).
 - Advertencia de "FromPort/ToPort requeridos" sobre las reglas de seguridad hacia RDS — falso
   positivo confirmado: esos campos sí están presentes en el template sintetizado, como referencia
   cruzada (`Fn::ImportValue`) al puerto de cada instancia RDS, no como literal — el linter no sabe
   inspeccionar tokens de CDK resueltos en deploy.
+
+`AWS::Budgets::Budget` (usado en `cost-stack.ts`) ya no genera warning de región: su API vive
+nativamente en `us-east-1`, que ahora es la región del proyecto — el pin explícito de esa stack a
+`us-east-1` (ver comentario en `lib/build-app.ts`) queda por claridad, aunque ya coincide con
+`config.region`.
 
 ## Decisiones de diseño no obvias
 
@@ -122,11 +125,10 @@ Los 9 templates se generan correctamente en los 3 entornos. El linter reporta ad
 
 ## Preguntas abiertas para el humano
 
-1. ¿`AWS::Budgets::Budget` funciona igual en `mx-central-1`, o el presupuesto debe gestionarse
-   desde `us-east-1` independientemente de dónde vive el resto de la infraestructura? Verificar en
-   consola antes del primer deploy.
-2. Nombres reales de AZ de `mx-central-1` (se asumió el patrón estándar `a`/`b`/`c`) — confirmar
-   contra la consola de AWS.
+1. ~~¿`AWS::Budgets::Budget` funciona igual en `mx-central-1`...?~~ Resuelto por ADR-018: el
+   proyecto entero pasó a `us-east-1`, la región nativa de Budgets — ya no aplica.
+2. ~~Nombres reales de AZ de `mx-central-1`...~~ Resuelto por ADR-018: `us-east-1a/b/c` es
+   nomenclatura estándar y estable, sin la incertidumbre que tenía la región anterior.
 3. ¿Se acepta HTTP:80 sin cifrado en tránsito hasta que exista un dominio, o esto bloquea el
    primer deploy a un entorno real (aunque sea `dev`)?
 4. La Fase 3 necesita decidir cómo se compone `DATABASE_URL` en cada servicio a partir de las

@@ -201,10 +201,11 @@ export class EdgeStack extends Stack {
     // storage-stack.ts es reusable (cada uno tiene un proposito especifico
     // de ADR-013), asi que se crea uno nuevo aqui. `logAccessLogs` agrega
     // la bucket policy del delivery account de ELB para la region via el
-    // mapeo interno de aws-cdk-lib/region-info -- si `mx-central-1` no
-    // tuviera entrada ahi, `cdk synth` fallaria con un error explicito (no
-    // silencioso); verificado que sintetiza limpio para las 3 regiones de
-    // este proyecto.
+    // mapeo interno de aws-cdk-lib/region-info -- si la region no tuviera
+    // entrada ahi, `cdk synth` fallaria con un error explicito (no
+    // silencioso). us-east-1 (ADR-018) tiene entrada solida en ese mapeo --
+    // la incertidumbre real era con mx-central-1 (ADR-010, reemplazado),
+    // region nueva de AWS.
     const albAccessLogsBucket = new SecureBucket(this, 'AlbAccessLogsBucket', {
       bucketName: `${prefix}-alb-access-logs`,
       removalPolicy: config.removalPolicy,

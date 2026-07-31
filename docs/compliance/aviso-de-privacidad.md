@@ -1,9 +1,10 @@
 # Aviso de privacidad
 
-**Última actualización:** Fase 5 del plan de plataforma multi-tenant (ver
-`claude/PLAN-challenge-5-plataforma-para-todos.md`). Este aviso debe revisarse cuando se publique
-el reglamento de la LFPDPPP (ADR-016) o cuando cambie cualquier finalidad, tercero o plazo descrito
-abajo.
+**Última actualización:** 2026-07-31 — agregada la sección "Transferencia internacional de datos"
+tras ADR-018 (cambio de región a `us-east-1`). Contenido original de Fase 5 del plan de plataforma
+multi-tenant (ver `claude/PLAN-challenge-5-plataforma-para-todos.md`). Este aviso debe revisarse
+cuando se publique el reglamento de la LFPDPPP (ADR-016) o cuando cambie cualquier finalidad,
+tercero o plazo descrito abajo.
 
 ## Responsable del tratamiento
 
@@ -45,6 +46,16 @@ resumen:
 
 No vendemos ni compartimos tus datos con nadie más. No usamos tus datos con fines de mercadotecnia
 ajenos al servicio que contrataste.
+
+## Transferencia internacional de datos
+
+Tus datos, incluidos los de salud, se alojan en infraestructura de Amazon Web Services en la
+región `us-east-1` (Virginia, Estados Unidos) — no dentro de México (ADR-018, que reemplaza la
+decisión original de `mx-central-1` de ADR-010). Esto constituye una transferencia internacional
+de datos personales bajo la LFPDPPP. AWS aplica cifrado en tránsito y en reposo sobre esos datos
+(ver "Medidas de seguridad" abajo). **Pendiente antes de operar con datos de pacientes reales**:
+formalizar el mecanismo de transferencia (cláusulas contractuales tipo o equivalente) — ver
+ADR-018, sección Consecuencias.
 
 ## Cuánto tiempo conservamos tus datos
 
@@ -89,3 +100,5 @@ publique el reglamento de la LFPDPPP. La versión vigente siempre vive en este m
 
 - `docs/compliance/inventario-datos-personales.md` — versión técnica completa de este aviso.
 - `docs/adr/ADR-013-almacenamiento-audit-log.md`, `docs/adr/ADR-016-retencion-borrado-datos.md`.
+- `docs/adr/ADR-018-cambio-region-us-east-1.md` — decisión de región y su implicación de
+  transferencia internacional (reemplaza `ADR-010-region-residencia-datos.md`).
