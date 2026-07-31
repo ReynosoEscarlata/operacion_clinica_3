@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(DATABASE_URL=\"postgresql://auth:auth@localhost:5433/auth_db?schema=public\" npx prisma migrate deploy)",
+      "Bash(DATABASE_URL=\"postgresql://auth:auth@localhost:5433/auth_db?schema=public\" npx prisma migrate reset --force --skip-seed)"
+    ]
+  }
+}

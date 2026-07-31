@@ -90,19 +90,19 @@ export class CostStack extends Stack {
       ],
     });
 
-    // Monitor DIMENSIONAL sobre SERVICE: AWS rastrea automáticamente hasta
-    // 5000 valores de este dimensión (cada servicio de AWS usado) y evalúa
-    // cada uno independientemente -- útil para "un servicio de AWS
-    // específico empezó a costar más de lo normal". Es de alcance de
-    // cuenta completa (no filtrado por tag), así que desplegar este stack
-    // en los 3 entornos crea 3 monitores equivalentes -- redundancia
-    // aceptada (documentada en docs/cost/cost-model.md) a cambio de que
-    // cada entorno tenga su propio ciclo de vida de stack independiente.
-    const serviceMonitor = new ce.CfnAnomalyMonitor(this, 'ServiceAnomalyMonitor', {
-      monitorName: `clinica-${config.envName}-service-anomaly-monitor`,
-      monitorType: 'DIMENSIONAL',
-      monitorDimension: 'SERVICE',
-    });
+    // NO se crea un monitor DIMENSIONAL/SERVICE propio: AWS permite un único
+    // monitor de ese tipo por cuenta (límite de la API, no de CDK) y ya
+    // provisiona uno por defecto (`Default-Services-Monitor`) sin acción del
+    // usuario -- confirmado en el primer intento de deploy real de este
+    // stack (`AWS::CE::AnomalyMonitor ... HandlerErrorCode: AlreadyExists`,
+    // `aws ce get-anomaly-monitors` lo mostró ya existente desde 2025-01-24).
+    // La suposición original ("desplegar este stack en los 3 entornos crea 3
+    // monitores equivalentes -- redundancia aceptada", docs/cost/cost-model.md)
+    // era incorrecta: ni el primer entorno puede crear uno nuevo. El monitor
+    // de cuenta por defecto ya cubre "un servicio de AWS específico empezó a
+    // costar más de lo normal" a nivel cuenta completa; no se suscribe aquí
+    // porque su ARN es específico de la cuenta y no debe hardcodearse en el
+    // stack (rompería portabilidad entre cuentas/entornos).
 
     // Monitor CUSTOM filtrado al tag Environment de este entorno
     // específico -- este SÍ está scoped, a diferencia del anterior: agrupa
@@ -121,7 +121,7 @@ export class CostStack extends Stack {
     new ce.CfnAnomalySubscription(this, 'AnomalySubscription', {
       subscriptionName: `clinica-${config.envName}-cost-anomaly`,
       frequency: 'IMMEDIATE',
-      monitorArnList: [serviceMonitor.attrMonitorArn, environmentTagMonitor.attrMonitorArn],
+      monitorArnList: [environmentTagMonitor.attrMonitorArn],
       subscribers: [{ type: 'SNS', address: this.costAlarmTopic.topicArn }],
       // ThresholdExpression (no el campo `threshold`, deprecado) -- impacto
       // absoluto en USD, NO VERIFICADO contra patrones de gasto reales (ver

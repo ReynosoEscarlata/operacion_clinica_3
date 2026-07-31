@@ -5,6 +5,13 @@
 > **Objetivo**: Plan fase-por-fase para desarrollar con Claude Code.
 > Cada fase incluye el prompt exacto que puedes copiar a Claude Code y los archivos esperados como resultado.
 
+> **Estado (actualizado 2026-07-31): Completado, con una deuda puntual señalada en Fase 9.** Este
+> es el plan original del monolito (`src/` en la raíz, Challenge 1-3) — el proyecto avanzó dos
+> challenges más allá (microservicios en Challenge 4, `PLAN.md`; SaaS multi-tenant en AWS en
+> Challenge 5, `claude/PLAN-challenge-5-plataforma-para-todos.md`). El monolito sigue intacto y
+> funcional (estrategia strangler fig, nunca se borró) — los estados por fase de abajo se
+> verificaron contra el estado real del repo, no de memoria.
+
 ---
 
 ## Fase 0 — Diseño Previo ✅ COMPLETADA
@@ -40,7 +47,7 @@ Debes poder dibujar el diagrama de estados en pizarra y explicar:
 
 ---
 
-## Fase 1 — Scaffold del Proyecto
+## Fase 1 — Scaffold del Proyecto ✅ COMPLETADA
 
 **Duración**: 1–2 días
 
@@ -132,7 +139,7 @@ make lint       # sin warnings
 
 ---
 
-## Fase 2 — Base de Datos y Modelos
+## Fase 2 — Base de Datos y Modelos ✅ COMPLETADA
 
 **Duración**: 2–3 días
 
@@ -198,7 +205,7 @@ npx prisma studio   # ver datos en el browser
 
 ---
 
-## Fase 3 — Configuración de Infraestructura
+## Fase 3 — Configuración de Infraestructura ✅ COMPLETADA
 
 **Duración**: 1–2 días
 
@@ -244,7 +251,7 @@ Escribe tests para:
 
 ---
 
-## Fase 4 — Módulo de Pacientes y Doctores (CRUD base)
+## Fase 4 — Módulo de Pacientes y Doctores (CRUD base) ✅ COMPLETADA
 
 **Duración**: 2–3 días
 
@@ -298,7 +305,7 @@ Tests:
 
 ---
 
-## Fase 5 — Módulo de Citas (Core)
+## Fase 5 — Módulo de Citas (Core) ✅ COMPLETADA
 
 **Duración**: 3–4 días
 
@@ -373,7 +380,7 @@ Tests:
 
 ---
 
-## Fase 6 — Webhooks de Stripe (Idempotencia)
+## Fase 6 — Webhooks de Stripe (Idempotencia) ✅ COMPLETADA
 
 **Duración**: 2–3 días
 
@@ -430,7 +437,12 @@ Tests (CRÍTICOS - el challenge exige demostrar idempotencia):
 
 ---
 
-## Fase 7 — Sistema de Colas (BullMQ)
+## Fase 7 — Sistema de Colas (BullMQ) ✅ COMPLETADA
+
+> Nota (2026-07-31): esto es específico del monolito (`src/queues/`, sigue usando BullMQ+Redis
+> intacto). Los 5 servicios extraídos en el Challenge 4/5 migraron su propia mensajería a
+> SNS/SQS/EventBridge Scheduler (ADR-014) — no reemplaza esto, es un sistema aparte para un
+> proceso distinto.
 
 **Duración**: 2–3 días
 
@@ -513,7 +525,11 @@ Tests:
 
 ---
 
-## Fase 8 — Panel Administrativo (API + Frontend básico)
+## Fase 8 — Panel Administrativo (API + Frontend básico) ✅ COMPLETADA
+
+> Nota (2026-07-31): el mismo frontend (`admin/`) se extendió después para apuntar al gateway de
+> microservicios en vez del monolito, y en Fase 6 del Challenge 5 (ADR-017) ganó una vista nueva
+> (`PlatformDashboardPage.tsx`) — sigue siendo la misma base construida acá, no una reescritura.
 
 **Duración**: 3–4 días
 
@@ -654,7 +670,15 @@ Usa fetch directo para las llamadas a la API. No axios.
 
 ---
 
-## Fase 9 — Documentación y ADRs
+## Fase 9 — Documentación y ADRs ⚠️ PARCIAL
+
+> Nota (2026-07-31): `docs/ADR-001-idempotency.md`, `docs/ADR-002-retry-strategy.md` y
+> `docs/RUNBOOK.md` — los 3 entregables que pedía esta fase, referenciados en `CLAUDE.md` como
+> "se crea en Fase 9" — **nunca se generaron como archivos**. La estrategia de idempotencia y de
+> retry sí están implementadas en código (`lib/idempotency.ts`, la tabla `WebhookEvent`, la
+> configuración por cola de BullMQ) y documentadas informalmente en `CLAUDE.md`/`SPEC.md`, pero no
+> como los ADRs dedicados que pedía este entregable. Deuda real, no bloqueante — el código
+> funciona y está probado, falta solo el documento.
 
 **Duración**: 1–2 días
 
@@ -704,7 +728,7 @@ Todos los documentos se guardan en la carpeta docs/ excepto SPEC.md y README.md 
 
 ---
 
-## Fase 10 — CI/CD y Testing E2E
+## Fase 10 — CI/CD y Testing E2E ✅ COMPLETADA
 
 **Duración**: 1–2 días
 
@@ -771,7 +795,13 @@ Para simular tiempo:
 
 ---
 
-## Fase 11 — Stretch Goals (Opcional)
+## Fase 11 — Stretch Goals (Opcional) ⬜ NO EJECUTADA
+
+> Nota (2026-07-31): ninguno de los 3 stretch goals (Google Calendar, WhatsApp/Twilio, Dashboard
+> de Métricas standalone) se implementó en el monolito — son explícitamente opcionales y no
+> bloquearon ninguna fase posterior. El equivalente de "dashboard de métricas" sí existe, pero en
+> los microservicios del Challenge 4/5 (Prometheus + Grafana, `infra/grafana/`), no en el
+> monolito.
 
 ### 11.1 Google Calendar
 

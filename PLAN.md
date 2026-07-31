@@ -1,5 +1,12 @@
 # Plan de ejecución — Challenge 4: "Romper el monolito"
 
+> **Estado (actualizado 2026-07-31): Completado.** Este plan es histórico — el monolito ya está
+> partido en los 5 servicios + gateway que describe, y el proyecto avanzó a un challenge
+> posterior (SaaS multi-tenant en AWS, ver `claude/PLAN-challenge-5-plataforma-para-todos.md`).
+> Los checkboxes de las secciones 1 y 3 se actualizaron abajo contra evidencia real del repo, no
+> de memoria — ver el detalle junto a cada ítem. El "broker de eventos: Redis Streams" del
+> supuesto original quedó superado: se migró a SNS/SQS/EventBridge Scheduler en el Challenge 5
+> (ADR-014, Fase 3b) — Redis sigue en `docker-compose.yml` únicamente para el monolito legado.
 
 ## 0. Contexto e instrucciones para Claude Code
 
@@ -32,12 +39,14 @@ Eres mi asistente de ingeniería para refactorizar la plataforma del **Challenge
 
 **Done cuando:**
 
-- [ ] El flujo end-to-end del challenge 3 sigue funcionando.
-- [ ] Tirar Notifications **no** rompe la reserva de citas (degraded mode: las citas se crean igual).
-- [ ] El pipeline despliega cada servicio de forma independiente.
-- [ ] Dashboard de métricas RED visible con datos reales.
-- [ ] Documentación de contratos pública (Swagger UI o Redoc).
-- [ ] Cada PR pasa tests de contrato automatizados.
+- [x] El flujo end-to-end del challenge 3 sigue funcionando.
+- [x] Tirar Notifications **no** rompe la reserva de citas (degraded mode: las citas se crean igual)
+      — verificado con el stack real en Docker, ver `SPEC.md` changelog, entrada 2026-06-21.
+- [x] El pipeline despliega cada servicio de forma independiente (`.github/workflows/*-ci.yml`, un
+      workflow por servicio con `paths:` filters).
+- [x] Dashboard de métricas RED visible con datos reales (`infra/grafana/provisioning/dashboards/json/red-metrics.json`).
+- [x] Documentación de contratos pública (`GET /docs` en el gateway, agregando el OpenAPI de cada servicio).
+- [x] Cada PR pasa tests de contrato automatizados (Pact, ver `pacts/*.json` y `tests/contract/` de cada servicio).
 
 ---
 
@@ -103,13 +112,26 @@ Buffer para deuda + stretch en orden de valor: **OpenTelemetry + Jaeger** (traci
 
 ## 3. Entregables finales
 
-- [ ] Repo (mono o multi) con CI/CD funcional por servicio.
-- [ ] `RFC-001-bounded-contexts.md` aprobado **antes** de codear.
-- [ ] `ADR-001`, `ADR-002`, `ADR-003`.
-- [ ] `POSTMORTEM-notifications-peak.md`.
-- [ ] Diagrama C4 nivel 2 (Mermaid).
-- [ ] `spec.md` actualizado con changelog de cambios del challenge 4.
-- [ ] Dashboard Grafana + docs OpenAPI públicas.
+- [x] Repo (monorepo) con CI/CD funcional por servicio (`.github/workflows/`).
+- [x] `RFC-001-bounded-contexts.md` aprobado **antes** de codear.
+- [x] `ADR-001`, `ADR-002`, `ADR-003` (además `ADR-004-postgres-por-servicio.md`, no listado
+      originalmente pero del mismo espíritu).
+- [ ] `POSTMORTEM-notifications-peak.md` — **no se generó como archivo dedicado.** El ensayo real
+      de degraded mode (sección 2, Fase 5) sí se ejecutó y quedó documentado inline en el
+      changelog de `SPEC.md` (entrada 2026-06-21, con los pasos, `XINFO GROUPS` y verificación de
+      catch-up del backlog) — cubre la evidencia que pedía este entregable, pero no en el formato
+      de postmortem simulado independiente que describía la Fase 5. Deuda menor, no bloqueante.
+- [x] Diagrama C4 nivel 2 (Mermaid) — `docs/architecture/C4-nivel2-contenedores.md` (nota: quedó
+      desactualizado por cambios posteriores del Challenge 5, ver nota de vigencia en ese archivo).
+- [x] `spec.md` actualizado con changelog de cambios del challenge 4 (sección "Changelog (Challenge 4)").
+- [x] Dashboard Grafana + docs OpenAPI públicas.
+
+**Fase 6 (buffer/stretch goals) — no ejecutada como se planteó:** ni OpenTelemetry+Jaeger, ni
+feature flags (Flagsmith), ni el job de chaos se implementaron. El tracing distribuido sí se
+resolvió, pero con AWS X-Ray en el Challenge 5 (ADR-017) en vez de OTel+Jaeger — decisión posterior
+con más contexto (todo el resto del stack ya era AWS-nativo). El canal `SmsChannel` (Fase 2,
+paso 3) tampoco se implementó — solo existe `EmailChannel`; la abstracción `NotificationChannel`
+que lo haría trivial sí quedó lista.
 
 ---
 
