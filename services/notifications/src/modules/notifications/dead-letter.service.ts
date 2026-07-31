@@ -41,7 +41,7 @@ export class DeadLetterService {
       payload: entry.payload as Record<string, unknown>,
       publishedAt: entry.failedAt.toISOString(),
     });
-    await this.repository.remove(id);
+    await this.repository.remove(id, 'retried');
   }
 
   async remove(id: string): Promise<void> {
@@ -49,7 +49,7 @@ export class DeadLetterService {
     if (!entry) {
       throw new AppError(404, 'DEAD_LETTER_NOT_FOUND', 'Entrada de dead-letter no encontrada');
     }
-    await this.repository.remove(id);
+    await this.repository.remove(id, 'manual');
   }
 }
 

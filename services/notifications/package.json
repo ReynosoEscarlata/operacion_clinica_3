@@ -21,6 +21,7 @@
   },
   "dependencies": {
     "@aws-sdk/client-sqs": "^3.687.0",
+    "@clinica/audit-log": "^0.1.0",
     "@clinica/authz": "^0.1.0",
     "@clinica/messaging": "^0.1.0",
     "@fastify/cors": "^9.0.1",

@@ -88,3 +88,29 @@ model DeadLetterEntry {
 
   @@index([tenantId, eventType])
 }
+
+// Audit log inmutable (Fase 5, ADR-013): append-only por privilegio de
+// motor (app_role solo tiene SELECT/INSERT, ver migración SQL). Sin
+// hash-chaining (decisión consciente de ADR-013). tenantId NOT NULL --
+// solo audita las rutas de dead-letter (gateadas a platform_admin,
+// RFC-004): list/retry/remove exponen payloads con PII de eventos de
+// dominio fallidos de un tenant ajeno al actor, exactamente el escenario
+// de acceso escalado que ADR-013 exige trazar.
+model AuditLog {
+  id            String   @id @default(uuid()) @db.Uuid
+  createdAt     DateTime @default(now())
+  tenantId      String   @db.Uuid
+  actorId       String?
+  actorRole     String?
+  action        String
+  resourceType  String
+  resourceId    String?
+  ip            String?
+  userAgent     String?
+  correlationId String?
+  result        String
+  justification String?
+
+  @@index([tenantId, createdAt])
+  @@index([resourceType, resourceId])
+}
