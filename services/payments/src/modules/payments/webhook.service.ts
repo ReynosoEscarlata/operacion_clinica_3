@@ -9,7 +9,7 @@ import type { WebhookEventsRepository } from './webhook-events.repository.js';
 
 // Payments nunca toca la BD de Appointments (RFC-001, cero estado
 // compartido): el resultado del webhook se publica como evento de dominio
-// (Outbox -> Redis Streams en la Fase 3) y Appointments lo consume para
+// (Outbox -> SNS/SQS, ADR-014) y Appointments lo consume para
 // avanzar su propia state machine. El appointmentId Y el tenantId viajan en
 // el metadata del PaymentIntent (ver payments.service.ts), no se buscan en
 // ninguna BD -- Stripe manda TODOS los eventos, de todos los tenants, a
