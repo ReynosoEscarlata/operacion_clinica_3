@@ -33,7 +33,9 @@ const COVERED = new Set([
   'DELETE /v1/admin/dead-letter/:id',
 ]);
 
-const ROUTE_CALL = /app\.(get|post|patch|put|delete)\(\s*\n?\s*['"]([^'"]+)['"]/g;
+// (?:<[^>]*>)? -- ver el mismo comentario en
+// services/auth/tests/isolation/route-coverage.meta.test.ts.
+const ROUTE_CALL = /app\.(get|post|patch|put|delete)(?:<[^>]*>)?\(\s*\n?\s*['"]([^'"]+)['"]/g;
 
 const extractRoutes = (dir: string): string[] => {
   const routes: string[] = [];

@@ -13,7 +13,9 @@ import type { PaymentsClient } from '../../src/clients/payments-client.js';
 const CONSULTATION_PRICE_CENTS = 70_000;
 
 const TEST_TENANT_ID = '99999999-9999-9999-9999-999999999999';
-const TENANT_HEADERS = { 'x-internal-tenant-id': TEST_TENANT_ID };
+// role clinic_owner (RFC-004): appointment:list/complete/mark_no_show en
+// 'all' -- necesario ahora que estas rutas exigen requirePermission().
+const TENANT_HEADERS = { 'x-internal-tenant-id': TEST_TENANT_ID, 'x-internal-user-role': 'clinic_owner' };
 
 // Bloques de 30 minutos a partir de las 09:00 del día siguiente, dentro de
 // "disponibilidad" simulada del doctor fake (09:00-12:00).
@@ -339,12 +341,13 @@ describe('Appointments (integración con DB real, Doctors/Payments mockeados)', 
     );
     createdAppointmentIds.push(appointment.id);
 
-    await app.inject({
+    const cancelResponse = await app.inject({
       method: 'PATCH',
       url: `/v1/appointments/${appointment.id}/cancel`,
-      headers: { 'x-internal-user-role': 'ADMIN' },
+      headers: { 'x-internal-user-role': 'clinic_owner' },
       payload: {},
     });
+    expect(cancelResponse.statusCode).toBe(200);
 
     const detail = await app.inject({ method: 'GET', url: `/v1/appointments/${appointment.id}` });
     const statusChangedEvent = (detail.json().events as Array<{ type: string; payload: { cancelledBy?: string } }>)

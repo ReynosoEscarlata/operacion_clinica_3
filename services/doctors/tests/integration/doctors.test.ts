@@ -22,7 +22,9 @@ const toLocalDateString = (date: Date): string => {
 // (create/addAvailability) requieren este header -- el directorio de
 // doctores es público por diseño, ver tenant-context.ts middleware.
 const TEST_TENANT_ID = '66666666-6666-6666-6666-666666666666';
-const TENANT_HEADERS = { 'x-internal-tenant-id': TEST_TENANT_ID };
+// role clinic_owner (RFC-004): doctor:create/doctor:manage_availability en
+// 'all' -- necesario ahora que estas rutas exigen requirePermission().
+const TENANT_HEADERS = { 'x-internal-tenant-id': TEST_TENANT_ID, 'x-internal-user-role': 'clinic_owner' };
 
 describe('Doctors CRUD + slots (integración con DB real)', () => {
   let app: FastifyInstance;

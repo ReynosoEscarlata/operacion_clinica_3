@@ -1,9 +1,11 @@
+import { registerAuthzEnforcement } from '@clinica/authz';
 import cors from '@fastify/cors';
 import type { PrismaClient } from '@prisma/client';
 import Fastify, { type FastifyInstance } from 'fastify';
 
 import { prisma as defaultPrisma } from './config/prisma.js';
 import { errorHandler } from './middleware/error-handler.js';
+import { registerAuthzContext } from './middleware/authz-context.js';
 import { registerMetricsMiddleware } from './middleware/metrics.js';
 import { registerRequestId } from './middleware/request-id.js';
 import { registerTenantContext } from './middleware/tenant-context.js';
@@ -28,6 +30,8 @@ export const buildApp = async (deps: BuildAppDeps = {}): Promise<FastifyInstance
   await app.register(cors);
   registerRequestId(app);
   registerTenantContext(app);
+  registerAuthzContext(app);
+  registerAuthzEnforcement(app);
   registerMetricsMiddleware(app);
   app.setErrorHandler(errorHandler);
 

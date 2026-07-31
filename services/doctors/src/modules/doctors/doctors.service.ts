@@ -1,6 +1,7 @@
 import type { Availability, Doctor } from '@prisma/client';
 
 import { AppError } from '../../lib/app-error.js';
+import { getAuthActor } from '../../lib/authz-context.js';
 import type { Logger } from '../../lib/logger.js';
 import { generateSlotsForDate, slotToIsoDateTime } from '../../lib/slots.js';
 import { getTenantId } from '../../lib/tenant-context.js';
@@ -118,6 +119,15 @@ export class DoctorService {
     const belongsToTenant = await this.repository.belongsToTenant(doctorId, tenantId);
     if (!belongsToTenant) {
       throw new AppError(404, 'DOCTOR_NOT_FOUND', 'Doctor no encontrado');
+    }
+
+    // RFC-004, filtro ABAC de propiedad: doctor:manage_availability es
+    // 'own' para el rol doctor -- a diferencia del 404 de aislamiento de
+    // tenant de arriba, acá sí es 403 (no 404): :id ya es público vía
+    // doctor:read, no hay nada que ocultar sobre su existencia.
+    const actor = getAuthActor();
+    if (actor?.role === 'doctor' && actor.doctorId !== doctorId) {
+      throw new AppError(403, 'FORBIDDEN', 'Solo puede gestionar su propia disponibilidad');
     }
 
     if (dto.startTime >= dto.endTime) {

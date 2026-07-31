@@ -93,3 +93,53 @@ describe('requirePermission: enforcement en runtime', () => {
     expect(response.statusCode).toBe(200);
   });
 });
+
+describe('requirePermission: allowAnonymous (RFC-004, paciente sin cuenta)', () => {
+  const buildApp = () => {
+    const app = Fastify();
+    app.decorateRequest('authActor', undefined);
+    app.addHook('onRequest', async (request) => {
+      const header = request.headers['x-test-actor'];
+      if (typeof header === 'string') {
+        request.authActor = JSON.parse(header) as AuthActor;
+      }
+    });
+    // appointment:create: doctor tiene 'none' en la matriz -- allowAnonymous
+    // deja pasar al paciente sin cuenta (sin authActor) pero sigue
+    // excluyendo a un doctor autenticado, a diferencia de config.authz.public.
+    app.get(
+      '/v1/appointments-like',
+      { preHandler: requirePermission('appointment:create', { allowAnonymous: true }) },
+      async () => ({ ok: true }),
+    );
+    return app;
+  };
+
+  it('sin authActor (paciente sin cuenta) pasa', async () => {
+    const app = buildApp();
+    const response = await app.inject({ method: 'GET', url: '/v1/appointments-like' });
+    expect(response.statusCode).toBe(200);
+  });
+
+  it('con un doctor autenticado (permiso "none" en la matriz) sigue rechazando', async () => {
+    const app = buildApp();
+    const actor: AuthActor = { role: 'doctor', tenantId: 'tenant-a', doctorId: 'doctor-a' };
+    const response = await app.inject({
+      method: 'GET',
+      url: '/v1/appointments-like',
+      headers: { 'x-test-actor': JSON.stringify(actor) },
+    });
+    expect(response.statusCode).toBe(403);
+  });
+
+  it('con receptionist autenticado (permiso "all" en la matriz) pasa', async () => {
+    const app = buildApp();
+    const actor: AuthActor = { role: 'receptionist', tenantId: 'tenant-a', doctorId: null };
+    const response = await app.inject({
+      method: 'GET',
+      url: '/v1/appointments-like',
+      headers: { 'x-test-actor': JSON.stringify(actor) },
+    });
+    expect(response.statusCode).toBe(200);
+  });
+});

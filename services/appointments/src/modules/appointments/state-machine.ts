@@ -1,5 +1,6 @@
 import type { Appointment, AppointmentStatus, EventType, Prisma, PrismaClient } from '@prisma/client';
 
+import { deniedByDoctorOwnership } from '../../lib/abac.js';
 import { AppError } from '../../lib/app-error.js';
 import type { Logger } from '../../lib/logger.js';
 import { getTenantId } from '../../lib/tenant-context.js';
@@ -53,7 +54,11 @@ const runTransition = async (
   metadata: TransitionMetadata,
 ): Promise<Appointment> => {
   const current = await tx.appointment.findUnique({ where: { id: appointmentId } });
-  if (!current) {
+  // RFC-004, filtro ABAC de propiedad: cancel/complete/mark_no_show pasan
+  // por transition() sin pasar por appointments.repository.ts#findById --
+  // este es el único punto de escritura real, así que el chequeo va aquí
+  // también (no solo en el repositorio, que cubre las lecturas/GET).
+  if (!current || deniedByDoctorOwnership(current.doctorId)) {
     throw new AppError(404, 'APPOINTMENT_NOT_FOUND', 'Cita no encontrada');
   }
 

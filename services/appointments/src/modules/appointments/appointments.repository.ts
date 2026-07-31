@@ -8,7 +8,9 @@ import type {
   PrismaClient,
 } from '@prisma/client';
 
+import { deniedByDoctorOwnership } from '../../lib/abac.js';
 import { AppError } from '../../lib/app-error.js';
+import { getAuthActor } from '../../lib/authz-context.js';
 import { getTenantId } from '../../lib/tenant-context.js';
 import { withTenant } from '../../lib/tenant-scoped.js';
 import { writeOutboxEvent } from '../../lib/outbox.js';
@@ -158,12 +160,19 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
   }
 
   async findById(id: string): Promise<AppointmentWithEvents | null> {
-    return withTenant(this.prisma, (tx) =>
+    const appointment = await withTenant(this.prisma, (tx) =>
       tx.appointment.findUnique({
         where: { id },
         include: { events: { orderBy: { createdAt: 'asc' } }, patient: true },
       }),
     );
+    // RFC-004, filtro ABAC de propiedad: un doctor que pide la cita de OTRO
+    // doctor recibe null (404 en el caller), no un 403 -- no confirmar que
+    // el recurso existe (mismo criterio que el aislamiento de tenant).
+    if (appointment && deniedByDoctorOwnership(appointment.doctorId)) {
+      return null;
+    }
+    return appointment;
   }
 
   async findStatusById(id: string): Promise<AppointmentStatus | null> {
@@ -179,11 +188,19 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
 
   async list(filters: ListAppointmentsFilters): Promise<ListAppointmentsResult> {
     return withTenant(this.prisma, async (tx) => {
+      const actor = getAuthActor();
+      // RFC-004, filtro ABAC de propiedad: un doctor SIEMPRE ve solo sus
+      // propias citas -- el spread de ownerFilter va al final a propósito,
+      // para pisar cualquier `doctorId` que el cliente haya pedido por
+      // query param (un doctor no puede pedir "dame las de otro doctor").
+      const ownerFilter: Prisma.AppointmentWhereInput =
+        actor?.role === 'doctor' && actor.doctorId ? { doctorId: actor.doctorId } : {};
       const where: Prisma.AppointmentWhereInput = {
         ...(filters.status ? { status: filters.status } : {}),
         ...(filters.doctorId ? { doctorId: filters.doctorId } : {}),
         ...(filters.patientId ? { patientId: filters.patientId } : {}),
         ...(filters.dateRange ? { dateTime: { gte: filters.dateRange.start, lt: filters.dateRange.end } } : {}),
+        ...ownerFilter,
       };
 
       // Paginación por cursor (no offset): se pide una página de más

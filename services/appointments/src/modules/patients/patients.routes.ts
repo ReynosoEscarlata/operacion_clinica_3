@@ -1,3 +1,4 @@
+import { requirePermission } from '@clinica/authz';
 import type { FastifyInstance } from 'fastify';
 
 import { buildHttpDoctorsClient, type DoctorsClient } from '../../clients/doctors-client.js';
@@ -13,6 +14,11 @@ import {
   ListPatientsQuery,
   PatientIdParams,
   UpdatePatientBody,
+  type CreatePatientDto,
+  type FindPatientByEmailQueryDto,
+  type ListPatientsQueryDto,
+  type PatientIdParamsDto,
+  type UpdatePatientDto,
 } from './patients.schemas.js';
 import { buildPatientService } from './patients.service.js';
 
@@ -29,17 +35,45 @@ export const registerPatientRoutes = (app: FastifyInstance, deps: PatientRoutesD
   const service = buildPatientService({ repository, paymentsClient, doctorsClient, logger: defaultLogger });
   const controller = buildPatientController(service);
 
-  app.post('/v1/patients', { schema: { body: CreatePatientBody } }, controller.create);
-  app.get(
+  // patient:create excluye a clinic_owner/clinic_admin/doctor/
+  // platform_support en la matriz de RFC-004 (solo platform_admin,
+  // receptionist, y el paciente self-service) -- allowAnonymous, no public.
+  app.post<{ Body: CreatePatientDto }>(
+    '/v1/patients',
+    {
+      schema: { body: CreatePatientBody },
+      config: { authz: { permission: 'patient:create', allowAnonymous: true } },
+      preHandler: requirePermission('patient:create', { allowAnonymous: true }),
+    },
+    controller.create,
+  );
+  // patient:read no excluye a nadie en la matriz -- público sin matices.
+  app.get<{ Querystring: FindPatientByEmailQueryDto }>(
     '/v1/patients/by-email',
-    { schema: { querystring: FindPatientByEmailQuery } },
+    { schema: { querystring: FindPatientByEmailQuery }, config: { authz: { public: true } } },
     controller.findByEmail,
   );
-  app.get('/v1/patients/:id', { schema: { params: PatientIdParams } }, controller.getById);
-  app.patch(
+  app.get<{ Params: PatientIdParamsDto }>(
     '/v1/patients/:id',
-    { schema: { params: PatientIdParams, body: UpdatePatientBody } },
+    { schema: { params: PatientIdParams }, config: { authz: { public: true } } },
+    controller.getById,
+  );
+  app.patch<{ Params: PatientIdParamsDto; Body: UpdatePatientDto }>(
+    '/v1/patients/:id',
+    {
+      schema: { params: PatientIdParams, body: UpdatePatientBody },
+      config: { authz: { permission: 'patient:update' } },
+      preHandler: requirePermission('patient:update'),
+    },
     controller.update,
   );
-  app.get('/v1/patients', { schema: { querystring: ListPatientsQuery } }, controller.list);
+  app.get<{ Querystring: ListPatientsQueryDto }>(
+    '/v1/patients',
+    {
+      schema: { querystring: ListPatientsQuery },
+      config: { authz: { permission: 'patient:list' } },
+      preHandler: requirePermission('patient:list'),
+    },
+    controller.list,
+  );
 };

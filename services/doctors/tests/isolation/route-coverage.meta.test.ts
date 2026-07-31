@@ -24,7 +24,9 @@ const EXEMPT = new Set([
 // nueva y no la agregas a esta lista (o a EXEMPT arriba), este test falla.
 const COVERED = new Set(['POST /v1/doctors', 'POST /v1/doctors/:id/availability']);
 
-const ROUTE_CALL = /app\.(get|post|patch|put|delete)\(\s*\n?\s*['"]([^'"]+)['"]/g;
+// (?:<[^>]*>)? -- ver el mismo comentario en
+// services/auth/tests/isolation/route-coverage.meta.test.ts.
+const ROUTE_CALL = /app\.(get|post|patch|put|delete)(?:<[^>]*>)?\(\s*\n?\s*['"]([^'"]+)['"]/g;
 
 const extractRoutes = (dir: string): string[] => {
   const routes: string[] = [];

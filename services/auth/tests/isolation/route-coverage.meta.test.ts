@@ -25,7 +25,12 @@ const EXEMPT = new Set([
 // aislamiento cross-tenant.
 const COVERED = new Set(['POST /v1/users', 'GET /v1/users', 'PATCH /v1/users/:id/deactivate']);
 
-const ROUTE_CALL = /app\.(get|post|patch|put|delete)\(\s*\n?\s*['"]([^'"]+)['"]/g;
+// (?:<[^>]*>)? -- Fase 4: app.post<{ Body: X }>('/ruta', ...) es el patrón
+// que exige agregar `config` junto a `schema` sin romper la inferencia de
+// Fastify (ver commit de requirePermission). Sin este grupo opcional, el
+// regex no matchea esas líneas y la ruta desaparece silenciosamente de
+// `routes` -- no falla el test, simplemente deja de cubrir nada.
+const ROUTE_CALL = /app\.(get|post|patch|put|delete)(?:<[^>]*>)?\(\s*\n?\s*['"]([^'"]+)['"]/g;
 
 const extractRoutes = (dir: string): string[] => {
   const routes: string[] = [];

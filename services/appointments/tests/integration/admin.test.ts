@@ -25,7 +25,10 @@ const buildFakePaymentsClient = (): PaymentsClient => ({
 // directas a `prisma` en este archivo pasan por withTenantId (RLS aplica
 // también a los fixtures de test, no solo al código de producción).
 const TEST_TENANT_ID = '77777777-7777-7777-7777-777777777777';
-const TENANT_HEADERS = { 'x-internal-tenant-id': TEST_TENANT_ID };
+// role platform_admin (RFC-004): es el único rol con 'all' en las 5
+// rutas de este archivo (dashboard:read/audit:read/dead_letter:*) --
+// clinic_owner no tiene dead_letter:*, es exclusivo del plano de plataforma.
+const TENANT_HEADERS = { 'x-internal-tenant-id': TEST_TENANT_ID, 'x-internal-user-role': 'platform_admin' };
 
 describe('Admin (dashboard/eventos/dead-letter, integración con Postgres real)', () => {
   let app: FastifyInstance;

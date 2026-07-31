@@ -29,7 +29,9 @@ const EXEMPT = new Set([
 // de las filas resultantes a nivel de BD).
 const COVERED = new Set(['POST /v1/webhooks/stripe']);
 
-const ROUTE_CALL = /app\.(get|post|patch|put|delete)\(\s*\n?\s*['"]([^'"]+)['"]/g;
+// (?:<[^>]*>)? -- ver el mismo comentario en
+// services/auth/tests/isolation/route-coverage.meta.test.ts.
+const ROUTE_CALL = /app\.(get|post|patch|put|delete)(?:<[^>]*>)?\(\s*\n?\s*['"]([^'"]+)['"]/g;
 
 const extractRoutes = (dir: string): string[] => {
   const routes: string[] = [];

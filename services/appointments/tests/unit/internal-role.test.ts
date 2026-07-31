@@ -11,17 +11,23 @@ describe('resolveCancelledBy', () => {
     expect(resolveCancelledBy(buildRequest({}))).toBe('PATIENT');
   });
 
-  it('con rol ADMIN reenviado por el gateway, asume que cancela un admin', () => {
-    expect(resolveCancelledBy(buildRequest({ 'x-internal-user-role': 'ADMIN' }))).toBe('ADMIN');
+  it('con rol clinic_owner reenviado por el gateway, asume que cancela un admin', () => {
+    expect(resolveCancelledBy(buildRequest({ 'x-internal-user-role': 'clinic_owner' }))).toBe('ADMIN');
   });
 
-  it('con rol STAFF reenviado por el gateway, asume que cancela un admin', () => {
-    expect(resolveCancelledBy(buildRequest({ 'x-internal-user-role': 'STAFF' }))).toBe('ADMIN');
+  it('con rol receptionist reenviado por el gateway, asume que cancela un admin', () => {
+    expect(resolveCancelledBy(buildRequest({ 'x-internal-user-role': 'receptionist' }))).toBe('ADMIN');
+  });
+
+  it('con rol doctor reenviado por el gateway, asume que cancela un admin', () => {
+    expect(resolveCancelledBy(buildRequest({ 'x-internal-user-role': 'doctor' }))).toBe('ADMIN');
+  });
+
+  it('con un rol desconocido (ej. el formato viejo ADMIN/STAFF, pre-Fase 4), no confía y asume paciente', () => {
+    expect(resolveCancelledBy(buildRequest({ 'x-internal-user-role': 'ADMIN' }))).toBe('PATIENT');
   });
 
   it('con un rol desconocido, no confía y asume paciente', () => {
-    expect(resolveCancelledBy(buildRequest({ 'x-internal-user-role': 'algo-raro' }))).toBe(
-      'PATIENT',
-    );
+    expect(resolveCancelledBy(buildRequest({ 'x-internal-user-role': 'algo-raro' }))).toBe('PATIENT');
   });
 });

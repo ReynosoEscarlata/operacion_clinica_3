@@ -1,3 +1,4 @@
+import { requirePermission } from '@clinica/authz';
 import type { FastifyInstance } from 'fastify';
 
 import { buildHttpDoctorsClient, type DoctorsClient } from '../../clients/doctors-client.js';
@@ -15,6 +16,10 @@ import {
   CancelAppointmentBody,
   CreateAppointmentBody,
   ListAppointmentsQuery,
+  type AppointmentIdParamsDto,
+  type CancelAppointmentDto,
+  type CreateAppointmentDto,
+  type ListAppointmentsQueryDto,
 } from './appointments.schemas.js';
 import { buildAppointmentService, type AppointmentService } from './appointments.service.js';
 import { buildStateMachine, type AppointmentStateMachine } from './state-machine.js';
@@ -61,26 +66,66 @@ export const registerAppointmentRoutes = (
   const service = buildDefaultAppointmentService(deps);
   const controller = buildAppointmentController(service);
 
-  // Públicas (ver gateway/src/middleware/verify-jwt.ts): el paciente no
-  // tiene cuenta, se identifica por posesión del UUID de la cita.
-  app.post('/v1/appointments', { schema: { body: CreateAppointmentBody } }, controller.create);
-  app.get('/v1/appointments/:id', { schema: { params: AppointmentIdParams } }, controller.getById);
-  app.patch(
+  // Públicas por posesión de UUID (ver gateway/src/middleware/verify-jwt.ts)
+  // -- el paciente no tiene cuenta (RFC-001). appointment:create/cancel usan
+  // allowAnonymous en vez de config.authz.public porque la matriz de
+  // RFC-004 excluye explícitamente a algún rol autenticado (doctor en
+  // create, platform_support en cancel) -- `public` liso desactivaría ese
+  // chequeo también para esos roles. appointment:read no excluye a nadie,
+  // así que sí puede ser público sin matices.
+  app.post<{ Body: CreateAppointmentDto }>(
+    '/v1/appointments',
+    {
+      schema: { body: CreateAppointmentBody },
+      config: { authz: { permission: 'appointment:create', allowAnonymous: true } },
+      preHandler: requirePermission('appointment:create', { allowAnonymous: true }),
+    },
+    controller.create,
+  );
+  app.get<{ Params: AppointmentIdParamsDto }>(
+    '/v1/appointments/:id',
+    { schema: { params: AppointmentIdParams }, config: { authz: { public: true } } },
+    controller.getById,
+  );
+  app.patch<{ Params: AppointmentIdParamsDto; Body: CancelAppointmentDto }>(
     '/v1/appointments/:id/cancel',
-    { schema: { params: AppointmentIdParams, body: CancelAppointmentBody } },
+    {
+      schema: { params: AppointmentIdParams, body: CancelAppointmentBody },
+      config: { authz: { permission: 'appointment:cancel', allowAnonymous: true } },
+      preHandler: requirePermission('appointment:cancel', { allowAnonymous: true }),
+    },
     controller.cancel,
   );
 
-  // Protegidas en el gateway (requieren JWT de Admin/Staff).
-  app.get('/v1/appointments', { schema: { querystring: ListAppointmentsQuery } }, controller.list);
-  app.patch(
+  // Protegidas en el gateway (requieren JWT) y ahora también por
+  // requirePermission() -- el filtro ABAC de propiedad del doctor
+  // (appointment.doctorId === actor.doctorId) vive en el repositorio/
+  // state-machine, no aquí (ver lib/abac.ts).
+  app.get<{ Querystring: ListAppointmentsQueryDto }>(
+    '/v1/appointments',
+    {
+      schema: { querystring: ListAppointmentsQuery },
+      config: { authz: { permission: 'appointment:list' } },
+      preHandler: requirePermission('appointment:list'),
+    },
+    controller.list,
+  );
+  app.patch<{ Params: AppointmentIdParamsDto }>(
     '/v1/appointments/:id/complete',
-    { schema: { params: AppointmentIdParams } },
+    {
+      schema: { params: AppointmentIdParams },
+      config: { authz: { permission: 'appointment:complete' } },
+      preHandler: requirePermission('appointment:complete'),
+    },
     controller.complete,
   );
-  app.patch(
+  app.patch<{ Params: AppointmentIdParamsDto }>(
     '/v1/appointments/:id/no-show',
-    { schema: { params: AppointmentIdParams } },
+    {
+      schema: { params: AppointmentIdParams },
+      config: { authz: { permission: 'appointment:mark_no_show' } },
+      preHandler: requirePermission('appointment:mark_no_show'),
+    },
     controller.markNoShow,
   );
 };

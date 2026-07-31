@@ -14,7 +14,13 @@ declare module 'fastify' {
   interface FastifyContextConfig {
     // Toda ruta bajo /v1/* debe declarar exactamente una de las dos formas
     // -- lo exige registerAuthzEnforcement en el arranque (fail-closed).
-    authz?: { permission: Permission } | { public: true };
+    // `allowAnonymous` cubre el caso real de RFC-004 donde una ruta es
+    // pública para el paciente sin cuenta (ningún AuthActor, RFC-001) PERO
+    // sigue excluyendo explícitamente a algún rol autenticado concreto (ej.
+    // appointment:create: el paciente puede, pero doctor no) -- `public`
+    // liso no alcanza ahí porque desactivaría el chequeo también para esos
+    // roles excluidos.
+    authz?: { permission: Permission; allowAnonymous?: boolean } | { public: true };
   }
 }
 
@@ -23,15 +29,21 @@ declare module 'fastify' {
 // (duplicada a propósito, mismo patrón que event-consumer.ts, ver ADR-012
 // "Cosas a monitorear") y un `throw` aquí no sería `instanceof` la de cada
 // servicio -- una respuesta directa evita ese acoplamiento cruzado.
-export const requirePermission = (permission: Permission): preHandlerHookHandler =>
+export const requirePermission = (
+  permission: Permission,
+  options: { allowAnonymous?: boolean } = {},
+): preHandlerHookHandler =>
   async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
-    if (!request.authActor || !can(request.authActor, permission)) {
+    if (!request.authActor) {
+      if (options.allowAnonymous) return;
       await reply.status(403).send({
-        error: {
-          code: 'FORBIDDEN',
-          message: `Permiso requerido: ${permission}`,
-          requestId: request.id,
-        },
+        error: { code: 'FORBIDDEN', message: `Permiso requerido: ${permission}`, requestId: request.id },
+      });
+      return;
+    }
+    if (!can(request.authActor, permission)) {
+      await reply.status(403).send({
+        error: { code: 'FORBIDDEN', message: `Permiso requerido: ${permission}`, requestId: request.id },
       });
     }
   };

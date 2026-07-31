@@ -4,6 +4,10 @@
 export const TENANT_A = 'a0000000-a000-a000-a000-a00000000001';
 export const TENANT_B = 'b0000000-b000-b000-b000-b00000000002';
 
+// role clinic_owner (RFC-004): doctor:create/doctor:manage_availability en
+// 'all' -- estos tests verifican aislamiento de tenant, no lógica de
+// permisos, así que usan el rol con más alcance para no acoplarse a eso.
 export const headersFor = (tenantId: string): Record<string, string> => ({
   'x-internal-tenant-id': tenantId,
+  'x-internal-user-role': 'clinic_owner',
 });

@@ -11,7 +11,9 @@ import type { DoctorsClient } from '../../src/clients/doctors-client.js';
 import type { PaymentsClient } from '../../src/clients/payments-client.js';
 
 const TEST_TENANT_ID = '55555555-5555-5555-5555-555555555555';
-const TENANT_HEADERS = { 'x-internal-tenant-id': TEST_TENANT_ID };
+// role clinic_owner (RFC-004): patient:update/patient:list en 'all' --
+// necesario ahora que estas rutas exigen requirePermission().
+const TENANT_HEADERS = { 'x-internal-tenant-id': TEST_TENANT_ID, 'x-internal-user-role': 'clinic_owner' };
 const doctorId = randomUUID();
 
 const fakePaymentsClient: PaymentsClient = {
