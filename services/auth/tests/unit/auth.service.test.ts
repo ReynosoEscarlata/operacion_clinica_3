@@ -1,4 +1,4 @@
-import type { User } from '@prisma/client';
+import type { Prisma, PrismaClient, User } from '@prisma/client';
 import { describe, expect, it } from 'vitest';
 
 import { logger } from '../../src/lib/logger.js';
@@ -73,6 +73,23 @@ const buildRefreshTokenRepository = (): RefreshTokenRepository & { issued: strin
   };
 };
 
+// Unit test: sin DB real, así que withTenantId() necesita un PrismaClient
+// falso. Solo se usa para $transaction(tx => ...) -- el tx expone auditLog
+// como no-op (writeAuditLog() lo llama, pero este test no verifica su
+// contenido, eso vive en tests/integration/audit-log.test.ts).
+const buildFakePrisma = (): PrismaClient => {
+  const tx = {
+    // withTenantId() llama tx.$executeRaw (set_config) antes de invocar el
+    // callback -- sin este stub, cualquier login()/refresh() falla acá
+    // antes de siquiera llegar a writeAuditLog().
+    $executeRaw: async () => 0,
+    auditLog: { create: async () => ({}) },
+  } as unknown as Prisma.TransactionClient;
+  return {
+    $transaction: async (fn: (tx: Prisma.TransactionClient) => Promise<unknown>) => fn(tx),
+  } as unknown as PrismaClient;
+};
+
 const buildUser = (overrides: Partial<User> = {}): User => ({
   id: 'user-1',
   tenantId: TENANT_A,
@@ -96,6 +113,7 @@ describe('AuthService', () => {
       usersRepository: buildUsersRepository([user]),
       refreshTokenRepository: buildRefreshTokenRepository(),
       logger,
+      prisma: buildFakePrisma(),
     });
 
     const result = await service.login('admin@clinica.test', 'correcto-123');
@@ -112,6 +130,7 @@ describe('AuthService', () => {
       usersRepository: buildUsersRepository([user]),
       refreshTokenRepository: buildRefreshTokenRepository(),
       logger,
+      prisma: buildFakePrisma(),
     });
 
     await expect(service.login('admin@clinica.test', 'incorrecto')).rejects.toMatchObject({
@@ -127,6 +146,7 @@ describe('AuthService', () => {
       usersRepository: buildUsersRepository([user]),
       refreshTokenRepository: buildRefreshTokenRepository(),
       logger,
+      prisma: buildFakePrisma(),
     });
 
     await expect(service.login('admin@clinica.test', 'correcto-123')).rejects.toMatchObject({
@@ -143,6 +163,7 @@ describe('AuthService', () => {
       usersRepository: buildUsersRepository([user]),
       refreshTokenRepository,
       logger,
+      prisma: buildFakePrisma(),
     });
 
     const result = await service.login('admin@clinica.test', 'correcto-123');
@@ -161,6 +182,7 @@ describe('AuthService', () => {
       usersRepository: buildUsersRepository([user]),
       refreshTokenRepository,
       logger,
+      prisma: buildFakePrisma(),
     });
 
     const { refreshToken } = await service.login('admin@clinica.test', 'correcto-123');

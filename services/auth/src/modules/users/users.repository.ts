@@ -1,5 +1,6 @@
 import type { PrismaClient, User, UserRole } from '@prisma/client';
 
+import { writeAuditLog } from '../../lib/audit-log.js';
 import { writeOutboxEvent } from '../../lib/outbox.js';
 import { getTenantId } from '../../lib/tenant-context.js';
 import { withTenant } from '../../lib/tenant-scoped.js';
@@ -61,6 +62,7 @@ export class PrismaUsersRepository implements UsersRepository {
         email: user.email,
         role: user.role,
       });
+      await writeAuditLog(tx, 'user.created', 'user', user.id, 'success');
       return user;
     });
   }
@@ -89,6 +91,9 @@ export class PrismaUsersRepository implements UsersRepository {
 
       const user = await tx.user.update({ where: { id }, data: { active: false } });
       await writeOutboxEvent(tx, 'UserDeactivated', { userId: user.id });
+      await writeAuditLog(tx, 'user.updated', 'user', user.id, 'success', {
+        justification: 'deactivate',
+      });
       return user;
     });
   }

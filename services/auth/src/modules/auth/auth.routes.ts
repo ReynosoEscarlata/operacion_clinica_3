@@ -29,7 +29,12 @@ export const registerAuthRoutes = (app: FastifyInstance, deps: AuthRoutesDeps = 
     deps.refreshTokenRepository ?? buildRefreshTokenRepository(defaultPrisma);
   const supportAccessGrantRepository =
     deps.supportAccessGrantRepository ?? buildSupportAccessGrantRepository(defaultPrisma);
-  const service = buildAuthService({ usersRepository, refreshTokenRepository, logger: defaultLogger });
+  const service = buildAuthService({
+    usersRepository,
+    refreshTokenRepository,
+    logger: defaultLogger,
+    prisma: defaultPrisma,
+  });
   const supportAccessService = buildSupportAccessService({
     repository: supportAccessGrantRepository,
     logger: defaultLogger,

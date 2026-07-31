@@ -1,8 +1,12 @@
+import type { PrismaClient } from '@prisma/client';
+
 import { env } from '../../config/env.js';
 import { AppError } from '../../lib/app-error.js';
+import { writeAuditLog } from '../../lib/audit-log.js';
 import { signAccessToken } from '../../lib/jwt.js';
 import type { Logger } from '../../lib/logger.js';
 import { verifyPassword } from '../../lib/password.js';
+import { withTenantId } from '../../lib/tenant-scoped.js';
 import { toAuthzRole } from '../users/users.mapper.js';
 import type { UsersRepository } from '../users/users.repository.js';
 import type { RefreshTokenRepository } from './refresh-token.repository.js';
@@ -18,6 +22,7 @@ export class AuthService {
     private readonly usersRepository: UsersRepository,
     private readonly refreshTokenRepository: RefreshTokenRepository,
     private readonly logger: Logger,
+    private readonly prisma: PrismaClient,
   ) {}
 
   async login(email: string, password: string): Promise<TokenPair> {
@@ -50,6 +55,21 @@ export class AuthService {
     // null) más el rol del actor, que activa la rama de plataforma de la
     // política RLS de RefreshToken cuando corresponde (ver tenant-scoped.ts).
     const { plain: refreshToken } = await this.refreshTokenRepository.issue(user.id, user.tenantId, actorRole);
+
+    // Fase 5 (ADR-013): sin TenantContext/AuthActor ambiental todavía en
+    // este punto (el request llegó sin autenticar) -- actor explícito, no
+    // el default ambiental de writeAuditLog(). Si el insert falla, se deja
+    // propagar: el login no debe devolver tokens sin haber quedado
+    // auditado.
+    await withTenantId(
+      this.prisma,
+      user.tenantId,
+      (tx) =>
+        writeAuditLog(tx, 'user.login', 'user', user.id, 'success', {
+          actor: { tenantId: user.tenantId, actorId: user.id, actorRole },
+        }),
+      actorRole,
+    );
 
     this.logger.info({ userId: user.id }, 'Login exitoso');
 
@@ -88,6 +108,16 @@ export class AuthService {
       actorRole,
     );
 
+    await withTenantId(
+      this.prisma,
+      record.tenantId,
+      (tx) =>
+        writeAuditLog(tx, 'user.token_refreshed', 'user', user.id, 'success', {
+          actor: { tenantId: record.tenantId, actorId: user.id, actorRole },
+        }),
+      actorRole,
+    );
+
     return { accessToken, refreshToken: newRefreshToken, expiresIn: env.ACCESS_TOKEN_TTL_SECONDS };
   }
 }
@@ -96,7 +126,8 @@ export interface AuthServiceDeps {
   usersRepository: UsersRepository;
   refreshTokenRepository: RefreshTokenRepository;
   logger: Logger;
+  prisma: PrismaClient;
 }
 
 export const buildAuthService = (deps: AuthServiceDeps): AuthService =>
-  new AuthService(deps.usersRepository, deps.refreshTokenRepository, deps.logger);
+  new AuthService(deps.usersRepository, deps.refreshTokenRepository, deps.logger, deps.prisma);
