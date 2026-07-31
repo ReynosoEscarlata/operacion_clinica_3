@@ -91,6 +91,11 @@ Fuente: inventario de `docs/baseline-challenge-4.md`.
     depende de datos en tiempo de ejecución. Justificación: no bloquea el arranque de la Fase 1,
     pero debe resolverse antes del Gate de la Fase 5 (compliance), inspeccionando datos reales de
     un entorno de test poblado.
+    **Actualización 2026-07-31:** la Fase 5 se cerró (`docs/compliance/inventario-datos-personales.md`)
+    sin hacer esta inspección puntual — el audit log cubre el *acceso* a los recursos que contienen
+    estas columnas (Patient/Appointment/etc.), pero no se clasificó el contenido real de estas 4
+    columnas específicas. Sigue abierto; no se marca resuelto para no reportar falsamente el Gate
+    de Fase 5 como completo en este punto.
 
 14. **Esquemas `Doctor`/`Availability` duplicados casi idénticos entre el monolito y el servicio
     `doctors`** — no es una violación de "un solo dueño" (cada uno tiene su propia tabla en su
