@@ -208,14 +208,18 @@ services:
       PORT: 4003
       DATABASE_URL: postgresql://doctors:doctors@postgres-doctors:5432/doctors_db?schema=public
       DATABASE_URL_APP: postgresql://app_role:app_role_dev_password@postgres-doctors:5432/doctors_db?schema=public
-      REDIS_URL: redis://redis:6379
+      AWS_REGION: us-east-1
+      AWS_ENDPOINT_URL: http://localstack:4566
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      DOMAIN_EVENTS_TOPIC_ARN: arn:aws:sns:us-east-1:000000000000:clinica-test-domain-events
     ports:
       - '4003:4003'
     depends_on:
       postgres-doctors:
         condition: service_healthy
-      redis:
-        condition: service_healthy
+      localstack-setup:
+        condition: service_completed_successfully
 
   payments:
     build:
