@@ -1,4 +1,4 @@
-import { Stack, type StackProps, RemovalPolicy } from 'aws-cdk-lib';
+import { Stack, type StackProps, RemovalPolicy, Tags } from 'aws-cdk-lib';
 import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import * as ecs from 'aws-cdk-lib/aws-ecs';
 import * as ecr from 'aws-cdk-lib/aws-ecr';
@@ -180,6 +180,14 @@ export class ComputeStack extends Stack {
         tracingEnabled: true,
       });
 
+      // Fase 6 (ADR-017): tag de costo por servicio -- Cost Explorer/el
+      // reporte de costo por tenant (docs/cost/reporte-costo-por-tenant.md)
+      // necesitan poder aislar el gasto real de CADA servicio, no solo el
+      // total de Compute. Aplica a todos los recursos taggeables dentro del
+      // subárbol del construct (ECS service, task definition, log group,
+      // security group, etc.).
+      Tags.of(clinicService).add('ClinicService', serviceName);
+
       // Grants de IAM (ADR-014) -- ninguno existia antes de Fase 3b. Cada
       // servicio recibe exactamente lo que necesita para su propio rol
       // (productor/consumidor), nunca acceso a las colas de otro servicio.
@@ -278,6 +286,7 @@ export class ComputeStack extends Stack {
       logRetention: config.logRetentionDays,
       tracingEnabled: true,
     });
+    Tags.of(services.gateway).add('ClinicService', 'gateway');
 
     this.services = services;
   }

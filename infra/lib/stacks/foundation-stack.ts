@@ -2,7 +2,6 @@ import { Stack, type StackProps, RemovalPolicy, Duration } from 'aws-cdk-lib';
 import * as cloudtrail from 'aws-cdk-lib/aws-cloudtrail';
 import * as s3 from 'aws-cdk-lib/aws-s3';
 import * as sns from 'aws-cdk-lib/aws-sns';
-import * as budgets from 'aws-cdk-lib/aws-budgets';
 import type { Construct } from 'constructs';
 import type { EnvironmentConfig } from '../../config/environments.js';
 
@@ -13,13 +12,14 @@ export interface FoundationStackProps extends StackProps {
 // Adaptación de ADR-009 (una sola cuenta AWS con 3 entornos lógicos, no AWS
 // Organizations): esta stack reemplaza lo que el plan maestro llamaba "landing
 // zone" (Organizations, SCPs, IAM Identity Center). Sin límite de cuenta entre
-// entornos, la fundación mínima que sí aplica es: un CloudTrail de cuenta
-// única (no organizacional) para auditoría, y un Budget con alerta desde el
-// día 1 (mitigación explícita del riesgo "factura de AWS inesperada" de la
-// sección 6 del plan maestro). El aislamiento de entorno se logra por tag y
-// naming, aplicado globalmente en bin/infra.ts, no por esta stack.
+// entornos, la fundación mínima que sí aplica es un CloudTrail de cuenta
+// única (no organizacional) para auditoría. El aislamiento de entorno se
+// logra por tag y naming, aplicado globalmente en bin/infra.ts, no por esta
+// stack. El Budget + Cost Anomaly Detection (mitigación del riesgo "factura
+// de AWS inesperada") viven en infra/lib/stacks/cost-stack.ts, pinneado a
+// us-east-1 -- ni `AWS::Budgets::Budget` ni Cost Anomaly Detection existen
+// en `mx-central-1` (ADR-010), así que no podían quedarse en esta stack.
 export class FoundationStack extends Stack {
-  public readonly budgetAlarmTopic: sns.Topic;
   public readonly operationalAlarmTopic: sns.Topic;
   public readonly securityAlarmTopic: sns.Topic;
 
@@ -59,16 +59,6 @@ export class FoundationStack extends Stack {
     // aceptar borrado público (BLOCK_ALL ya lo cubre) y su remoción sigue la
     // política de remoción del entorno (RETAIN en prod).
 
-    this.budgetAlarmTopic = new sns.Topic(this, 'BudgetAlarmTopic', {
-      topicName: `clinica-${config.envName}-budget-alerts`,
-      displayName: `Alertas de presupuesto — ${config.envName}`,
-    });
-
-    // Suscripción de email NO se hardcodea aquí (evita comprometer un correo
-    // real en el repo) — se documenta en infra/README.md como paso manual
-    // post-deploy: `aws sns subscribe --topic-arn <arn> --protocol email
-    // --notification-endpoint <tu-email>`.
-
     // Topic de alarmas operativas (CPU, targets no saludables, DLQ no vacía)
     // — separado del de presupuesto porque son audiencias distintas (equipo
     // de guardia vs. quien controla el gasto). Se crea aquí, en la primera
@@ -85,45 +75,10 @@ export class FoundationStack extends Stack {
     // confirmado es un posible incidente LFPDPPP (Ley Federal de Protección
     // de Datos Personales en Posesión de los Particulares), audiencia
     // distinta de "algo se cayó" (guardia técnica). Se suscribe a mano
-    // post-deploy, igual que budgetAlarmTopic (infra/README.md).
+    // post-deploy, igual que el topic de costos (infra/README.md).
     this.securityAlarmTopic = new sns.Topic(this, 'SecurityAlarmTopic', {
       topicName: `clinica-${config.envName}-security-alerts`,
       displayName: `Alertas de seguridad — ${config.envName}`,
-    });
-
-    new budgets.CfnBudget(this, 'MonthlyBudget', {
-      budget: {
-        budgetType: 'COST',
-        timeUnit: 'MONTHLY',
-        budgetName: `clinica-${config.envName}-monthly`,
-        budgetLimit: {
-          amount: config.budgetLimitUsd,
-          unit: 'USD',
-        },
-        costFilters: {
-          TagKeyValue: [`user:Environment$${config.envName}`],
-        },
-      },
-      notificationsWithSubscribers: [
-        {
-          notification: {
-            notificationType: 'ACTUAL',
-            comparisonOperator: 'GREATER_THAN',
-            threshold: 80,
-            thresholdType: 'PERCENTAGE',
-          },
-          subscribers: [{ subscriptionType: 'SNS', address: this.budgetAlarmTopic.topicArn }],
-        },
-        {
-          notification: {
-            notificationType: 'ACTUAL',
-            comparisonOperator: 'GREATER_THAN',
-            threshold: 100,
-            thresholdType: 'PERCENTAGE',
-          },
-          subscribers: [{ subscriptionType: 'SNS', address: this.budgetAlarmTopic.topicArn }],
-        },
-      ],
     });
   }
 }

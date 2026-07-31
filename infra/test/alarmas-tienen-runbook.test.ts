@@ -44,8 +44,8 @@ describe('toda alarma de CloudWatch declara un runbook que existe en disco', () 
   const app = buildApp('dev');
   const stacks = app.node.children.filter((child): child is Stack => child instanceof Stack);
 
-  it('build-app.ts produjo al menos los 9 stacks esperados', () => {
-    expect(stacks.length).toBeGreaterThanOrEqual(9);
+  it('build-app.ts produjo al menos los 10 stacks esperados', () => {
+    expect(stacks.length).toBeGreaterThanOrEqual(10);
   });
 
   for (const stack of stacks) {

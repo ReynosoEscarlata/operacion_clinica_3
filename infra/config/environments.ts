@@ -58,6 +58,11 @@ export interface EnvironmentConfig {
   // prod usa un valor bajo para no pagar una traza por request cuando haya
   // tráfico real.
   xraySamplingRate: number;
+  // Fase 6 (ADR-017) -- NO VERIFICADO contra patrones de gasto reales (no
+  // existe tráfico todavía): impacto absoluto en USD que dispara una
+  // notificación de Cost Anomaly Detection (infra/lib/stacks/cost-stack.ts).
+  // Escalado con budgetLimitUsd de cada entorno, no un número fijo repetido.
+  costAnomalyThresholdUsd: number;
 }
 
 const defaultRdsSizing = (multiAz: boolean, allocatedStorageGb = 20): RdsSizing => ({
@@ -105,6 +110,7 @@ export const ENVIRONMENTS: Record<'dev' | 'staging' | 'prod', EnvironmentConfig>
     budgetLimitUsd: 150,
     logRetentionDays: logs.RetentionDays.ONE_WEEK,
     xraySamplingRate: 1,
+    costAnomalyThresholdUsd: 20,
   },
   staging: {
     envName: 'staging',
@@ -117,6 +123,7 @@ export const ENVIRONMENTS: Record<'dev' | 'staging' | 'prod', EnvironmentConfig>
     budgetLimitUsd: 200,
     logRetentionDays: logs.RetentionDays.ONE_MONTH,
     xraySamplingRate: 1,
+    costAnomalyThresholdUsd: 30,
   },
   prod: {
     envName: 'prod',
@@ -134,6 +141,7 @@ export const ENVIRONMENTS: Record<'dev' | 'staging' | 'prod', EnvironmentConfig>
     // fixed_target=1 (siempre al menos 1 traza/seg) + rate=0.05 (5% del
     // resto) -- ver packages/observability/src/xray.ts (configureSampling).
     xraySamplingRate: 0.05,
+    costAnomalyThresholdUsd: 50,
   },
 };
 

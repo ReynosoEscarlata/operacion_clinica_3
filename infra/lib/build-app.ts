@@ -10,6 +10,7 @@ import { IdentityStack } from './stacks/identity-stack.js';
 import { ComputeStack } from './stacks/compute-stack.js';
 import { EdgeStack } from './stacks/edge-stack.js';
 import { ObservabilityStack } from './stacks/observability-stack.js';
+import { CostStack } from './stacks/cost-stack.js';
 
 // Extraído de bin/infra.ts (Fase 6, ADR-017): infra/test/alarmas-tienen-runbook.test.ts
 // necesita construir el mismo árbol de stacks para inspeccionar sus
@@ -75,6 +76,15 @@ export const buildApp = (envNameOverride?: string): App => {
     securityAlarmTopic: foundation.securityAlarmTopic,
   });
 
+  // us-east-1, no `config.region` (mx-central-1) -- ver el comentario en
+  // cost-stack.ts: ni Budgets ni Cost Anomaly Detection existen fuera de
+  // us-east-1. Sin dependencias de otros stacks (topic propio), así que no
+  // necesita `crossRegionReferences` ni un orden particular.
+  const cost = new CostStack(app, `${stackPrefix}-Cost`, {
+    env: { account: config.account, region: 'us-east-1' },
+    config,
+  });
+
   // Regla de seguridad ALB -> gateway, creada aqui (no dentro de EdgeStack ni
   // de ComputeStack) y parenteada bajo `compute`: mantiene la dependencia
   // cross-stack en una sola direccion (Compute->Edge, la misma que ya crea
@@ -89,26 +99,29 @@ export const buildApp = (envNameOverride?: string): App => {
     description: 'Trafico desde el ALB',
   });
 
-  // Referencias para evitar que TypeScript marque estos bindings como no
-  // usados cuando su unico proposito es fijar el orden de dependencia de CDK
-  // (storage/identity/edge/observability no se re-exportan mas alla de esta
-  // función).
-  void storage;
-  void identity;
-  void edge;
-  void observability;
-
   // Tags obligatorias a nivel de app (DoD de la Fase 2: "Todo recurso
   // etiquetado"). ManagedBy=IaC deja explicito que ningun recurso de esta app
   // se creo a mano en la consola.
   Tags.of(app).add('Environment', config.envName);
   Tags.of(app).add('CostCenter', 'clinica-scheduler');
   Tags.of(app).add('ManagedBy', 'IaC');
-  // El tag "Service" se aplica por stack, no globalmente (cada stack cubre un
-  // dominio distinto: red, datos, compute, etc.) — ver `Tags.of(<stack>)` en
-  // cada archivo de lib/stacks si se necesita granularidad adicional; el
-  // default aqui cubre el requisito minimo de DoD sin repetirlo por stack.
   Tags.of(app).add('Service', 'clinica-scheduler-platform');
+
+  // Fase 6 (ADR-017): tag `Component` por stack -- junto con `ClinicService`
+  // (por servicio, ver compute-stack.ts/database-stack.ts), es el segundo
+  // eje de desglose que docs/cost/reporte-costo-por-tenant.md necesita para
+  // separar costo fijo de plataforma (red, mensajería) del costo atribuible
+  // a un servicio concreto.
+  Tags.of(foundation).add('Component', 'foundation');
+  Tags.of(network).add('Component', 'network');
+  Tags.of(database).add('Component', 'database');
+  Tags.of(messaging).add('Component', 'messaging');
+  Tags.of(storage).add('Component', 'storage');
+  Tags.of(identity).add('Component', 'identity');
+  Tags.of(compute).add('Component', 'compute');
+  Tags.of(edge).add('Component', 'edge');
+  Tags.of(observability).add('Component', 'observability');
+  Tags.of(cost).add('Component', 'cost');
 
   return app;
 };

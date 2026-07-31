@@ -5,9 +5,12 @@
   "type": "module",
   "scripts": {
     "loadtest": "node loadtest.mjs",
-    "localstack:setup": "node localstack-setup.mjs"
+    "localstack:setup": "node localstack-setup.mjs",
+    "costo-por-tenant": "node costo-por-tenant.mjs"
   },
   "dependencies": {
+    "@aws-sdk/client-cloudwatch-logs": "^3.687.0",
+    "@aws-sdk/client-cost-explorer": "^3.687.0",
     "@aws-sdk/client-scheduler": "^3.687.0",
     "@aws-sdk/client-sns": "^3.687.0",
     "@aws-sdk/client-sqs": "^3.687.0",

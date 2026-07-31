@@ -1,4 +1,4 @@
-import { Stack, type StackProps, Duration, RemovalPolicy } from 'aws-cdk-lib';
+import { Stack, type StackProps, Duration, RemovalPolicy, Tags } from 'aws-cdk-lib';
 import * as cloudwatch from 'aws-cdk-lib/aws-cloudwatch';
 import * as snsActions from 'aws-cdk-lib/aws-cloudwatch-actions';
 import * as ec2 from 'aws-cdk-lib/aws-ec2';
@@ -100,6 +100,11 @@ export class DatabaseStack extends Stack {
       // de rotacion gestionada por Secrets Manager que el resto del sistema
       // de credenciales deberia seguir).
       instance.addRotationSingleUser({ automaticallyAfter: Duration.days(30) });
+
+      // Fase 6 (ADR-017): mismo tag ClinicService que compute-stack.ts --
+      // la RDS de cada servicio es la otra mitad de su costo real (además
+      // del Fargate), necesaria para el reporte de costo por tenant.
+      Tags.of(instance).add('ClinicService', serviceName);
 
       const alarmAction = new snsActions.SnsAction(props.alarmTopic);
       const rdsRunbook = 'alarma-rds.md';
