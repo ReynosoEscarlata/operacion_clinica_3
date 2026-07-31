@@ -110,6 +110,12 @@ export class ComputeStack extends Stack {
         // defecto (el taskRole otorgado mas abajo), solo LocalStack/dev
         // necesita esos overrides (ver services/*/src/config/env.ts).
         AWS_REGION: config.region,
+        // Fase 6 (ADR-017): EMF llega por el log driver `awslogs` que ya
+        // existe (sin IAM nuevo) -- habilitado en todo despliegue real a
+        // AWS (el default `false` de cada servicio es solo para que su
+        // propia suite de tests no escupa documentos EMF por request).
+        EMF_ENABLED: 'true',
+        ENV_NAME: config.envName,
       };
 
       // Auth/Doctors/Payments solo producen (outbox-relay -> SNS).
@@ -255,6 +261,8 @@ export class ComputeStack extends Stack {
         DOCTORS_SERVICE_URL: cloudMapUrl('doctors'),
         PAYMENTS_SERVICE_URL: cloudMapUrl('payments'),
         NOTIFICATIONS_SERVICE_URL: cloudMapUrl('notifications'),
+        EMF_ENABLED: 'true',
+        ENV_NAME: config.envName,
       },
       alarmTopic,
       removalPolicyIsDestroy: config.removalPolicy === ('destroy' as never),

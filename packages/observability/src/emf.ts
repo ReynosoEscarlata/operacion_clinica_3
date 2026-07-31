@@ -14,9 +14,13 @@ export interface EmitRequestMetricsInput {
   method: string;
   statusCode: number;
   durationMs: number;
-  tenantId?: string | null;
-  requestId?: string;
-  traceId?: string;
+  // `| undefined` explícito (no solo `?:`) porque `exactOptionalPropertyTypes`
+  // exige que el tipo declarado incluya `undefined` cuando el caller pasa el
+  // resultado directo de `getTenantId()`/`getRequestId()` (que ya devuelven
+  // `undefined` cuando no hay contexto ambiental) en vez de omitir la clave.
+  tenantId?: string | null | undefined;
+  requestId?: string | undefined;
+  traceId?: string | undefined;
 }
 
 export interface EmfDocument {

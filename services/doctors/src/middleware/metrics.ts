@@ -1,6 +1,11 @@
+import { emitRequestMetrics } from '@clinica/observability';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 
+import { env } from '../config/env.js';
 import { httpRequestDurationSeconds, httpRequestErrorsTotal, httpRequestsTotal } from '../lib/metrics.js';
+import { logger } from '../lib/logger.js';
+import { getRequestId } from '../lib/request-context.js';
+import { getTenantId } from '../lib/tenant-context.js';
 
 const requestStartTimes = new WeakMap<FastifyRequest, bigint>();
 
@@ -20,15 +25,34 @@ export const registerMetricsMiddleware = (app: FastifyInstance): void => {
 
     httpRequestsTotal.inc({ method, route, status_code: statusCode });
 
+    let durationMs = 0;
     const startedAt = requestStartTimes.get(request);
     if (startedAt !== undefined) {
       const durationSeconds = Number(process.hrtime.bigint() - startedAt) / 1e9;
       httpRequestDurationSeconds.observe({ method, route, status_code: statusCode }, durationSeconds);
+      durationMs = durationSeconds * 1000;
       requestStartTimes.delete(request);
     }
 
     if (reply.statusCode >= 500) {
       httpRequestErrorsTotal.inc({ method, route });
+    }
+
+    // Fase 6 (ADR-017): capa adicional, aditiva -- la ruta Prometheus de
+    // arriba no cambia. Deshabilitado por default (EMF_ENABLED=false) para
+    // que la suite de tests no escupa documentos EMF en cada request.
+    if (env.EMF_ENABLED) {
+      emitRequestMetrics(logger, {
+        namespace: env.EMF_NAMESPACE,
+        service: 'doctors',
+        environment: env.ENV_NAME,
+        route,
+        method,
+        statusCode: reply.statusCode,
+        durationMs,
+        tenantId: getTenantId(),
+        requestId: getRequestId(),
+      });
     }
   });
 };

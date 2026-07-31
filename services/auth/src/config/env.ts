@@ -21,6 +21,16 @@ const schema = z.object({
   AWS_ACCESS_KEY_ID: z.string().optional(),
   AWS_SECRET_ACCESS_KEY: z.string().optional(),
   DOMAIN_EVENTS_TOPIC_ARN: z.string().min(1),
+  // Fase 6 (ADR-017): EMF llega a CloudWatch por el log driver `awslogs` que
+  // ya existe (sin IAM nuevo) -- deshabilitado por default para que la
+  // suite de tests no escupa documentos EMF en cada request.
+  EMF_ENABLED: z.coerce.boolean().default(false),
+  EMF_NAMESPACE: z.string().default('Clinica'),
+  // Dimensión `Environment` de las métricas EMF -- distinto de NODE_ENV
+  // (development/test/production): calza con `config.envName` de
+  // infra/config/environments.ts (dev/staging/prod), inyectado por
+  // compute-stack.ts en AWS real.
+  ENV_NAME: z.string().default('dev'),
 });
 
 export const env = schema.parse(process.env);

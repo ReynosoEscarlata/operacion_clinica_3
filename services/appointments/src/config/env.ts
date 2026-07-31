@@ -45,6 +45,16 @@ const schema = z.object({
   // Usados al crear los one-time schedules de expiration/reminders.
   SCHEDULER_GROUP_NAME: z.string().min(1),
   SCHEDULER_EXECUTION_ROLE_ARN: z.string().min(1),
+  // Fase 6 (ADR-017): EMF llega a CloudWatch por el log driver `awslogs` que
+  // ya existe (sin IAM nuevo) -- deshabilitado por default para que la
+  // suite de tests no escupa documentos EMF en cada request.
+  EMF_ENABLED: z.coerce.boolean().default(false),
+  EMF_NAMESPACE: z.string().default('Clinica'),
+  // Dimensión `Environment` de las métricas EMF -- distinto de NODE_ENV
+  // (development/test/production): calza con `config.envName` de
+  // infra/config/environments.ts (dev/staging/prod), inyectado por
+  // compute-stack.ts en AWS real.
+  ENV_NAME: z.string().default('dev'),
 });
 
 export const env = schema.parse(process.env);
