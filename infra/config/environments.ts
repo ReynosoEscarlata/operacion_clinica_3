@@ -1,4 +1,5 @@
 import { RemovalPolicy } from 'aws-cdk-lib';
+import * as logs from 'aws-cdk-lib/aws-logs';
 
 // Nombres de los 5 servicios de dominio (Challenge 4) + gateway. No incluye el
 // monolito legado (src/ en la raíz) — ese sigue corriendo fuera de AWS, en
@@ -41,6 +42,15 @@ export interface EnvironmentConfig {
   // infra/README.md para el trade-off aceptado.
   removalPolicy: RemovalPolicy;
   budgetLimitUsd: number;
+  // Fase 6 (ADR-017): primera cifra concreta de retención de logs por
+  // entorno -- ADR-016 fijó el criterio ("hardcodeado por tipo de dato")
+  // pero dejó el número abierto. Antes de esta fase, ONE_MONTH fijo en los
+  // 3 entornos (ver clinic-service.ts).
+  logRetentionDays: logs.RetentionDays;
+  // Sampling de X-Ray: 1 = traza el 100% (dev/staging, tráfico bajo hoy);
+  // prod usa un valor bajo para no pagar una traza por request cuando haya
+  // tráfico real.
+  xraySamplingRate: number;
 }
 
 const defaultRdsSizing = (multiAz: boolean, allocatedStorageGb = 20): RdsSizing => ({
@@ -85,6 +95,8 @@ export const ENVIRONMENTS: Record<'dev' | 'staging' | 'prod', EnvironmentConfig>
     fargate: buildFargateConfig(1),
     removalPolicy: RemovalPolicy.DESTROY,
     budgetLimitUsd: 150,
+    logRetentionDays: logs.RetentionDays.ONE_WEEK,
+    xraySamplingRate: 1,
   },
   staging: {
     envName: 'staging',
@@ -95,6 +107,8 @@ export const ENVIRONMENTS: Record<'dev' | 'staging' | 'prod', EnvironmentConfig>
     fargate: buildFargateConfig(1),
     removalPolicy: RemovalPolicy.SNAPSHOT,
     budgetLimitUsd: 200,
+    logRetentionDays: logs.RetentionDays.ONE_MONTH,
+    xraySamplingRate: 1,
   },
   prod: {
     envName: 'prod',
@@ -108,6 +122,10 @@ export const ENVIRONMENTS: Record<'dev' | 'staging' | 'prod', EnvironmentConfig>
     fargate: buildFargateConfig(2),
     removalPolicy: RemovalPolicy.RETAIN,
     budgetLimitUsd: 300,
+    logRetentionDays: logs.RetentionDays.THREE_MONTHS,
+    // fixed_target=1 (siempre al menos 1 traza/seg) + rate=0.05 (5% del
+    // resto) -- ver packages/observability/src/xray.ts (configureSampling).
+    xraySamplingRate: 0.05,
   },
 };
 

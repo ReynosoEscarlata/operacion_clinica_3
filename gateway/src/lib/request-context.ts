@@ -8,6 +8,10 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 export interface RequestContext {
   requestId: string;
   tenantId?: string | null;
+  // Poblado por el plugin de X-Ray (Fase 6, ADR-017), igual que tenantId:
+  // el store ya existe (entrado por request-id.ts), así que se mutan ambos
+  // campos en el lugar en vez de volver a entrar el contexto.
+  traceId?: string;
 }
 
 export const requestContextStorage = new AsyncLocalStorage<RequestContext>();
@@ -15,6 +19,13 @@ export const requestContextStorage = new AsyncLocalStorage<RequestContext>();
 export const getRequestId = (): string | undefined => requestContextStorage.getStore()?.requestId;
 
 export const getTenantId = (): string | null | undefined => requestContextStorage.getStore()?.tenantId;
+
+export const getTraceId = (): string | undefined => requestContextStorage.getStore()?.traceId;
+
+export const setTraceId = (traceId: string): void => {
+  const store = requestContextStorage.getStore();
+  if (store) store.traceId = traceId;
+};
 
 // verify-jwt.ts corre en un hook `preHandler`, después de que request-id.ts
 // (hook `onRequest`) ya llamó a `enterWith` -- no se puede volver a llamar

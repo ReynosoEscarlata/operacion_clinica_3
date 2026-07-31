@@ -9,7 +9,7 @@ export type {
   SecurityEventSeverity,
   SecurityEventType,
 } from './security-events.js';
-export { FULL_SAMPLING, configureSampling } from './xray.js';
-export type { XraySamplingConfig } from './xray.js';
+export { FULL_SAMPLING, configureSampling, formatTraceHeader } from './xray.js';
+export type { XraySamplingConfig, XraySegmentLike } from './xray.js';
 export { registerXray } from './xray-plugin.js';
 export type { RegisterXrayOptions, XrayContext } from './xray-plugin.js';

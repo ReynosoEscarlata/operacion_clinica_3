@@ -19,3 +19,17 @@ export const configureSampling = (config: XraySamplingConfig): void => {
     rules: [],
   });
 };
+
+export interface XraySegmentLike {
+  trace_id: string;
+  id: string;
+  notTraced?: boolean;
+}
+
+// Mismo formato que usa el patcher HTTP oficial de aws-xray-sdk-core
+// (captureHTTPs, deshabilitado acá vía captureHTTP: false para no parchear
+// el módulo http global) -- lo replicamos a mano para propagar la traza en
+// los fetch síncronos entre servicios (doctors-client.ts, payments-client.ts)
+// sin activar ese parche global.
+export const formatTraceHeader = (segment: XraySegmentLike): string =>
+  `Root=${segment.trace_id};Parent=${segment.id};Sampled=${segment.notTraced ? '0' : '1'}`;

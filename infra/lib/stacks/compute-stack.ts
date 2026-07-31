@@ -116,6 +116,11 @@ export class ComputeStack extends Stack {
         // propia suite de tests no escupa documentos EMF por request).
         EMF_ENABLED: 'true',
         ENV_NAME: config.envName,
+        // Fase 6 (ADR-017): sidecar xray-daemon siempre presente en AWS real
+        // (ver ClinicService más abajo) -- el sampling rate sí varía por
+        // entorno (environments.ts).
+        XRAY_ENABLED: 'true',
+        XRAY_SAMPLING_RATE: String(config.xraySamplingRate),
       };
 
       // Auth/Doctors/Payments solo producen (outbox-relay -> SNS).
@@ -171,6 +176,8 @@ export class ComputeStack extends Stack {
           serviceName === 'appointments' ? messaging.appointmentsDomainEventsQueue.queue : undefined,
         alarmTopic,
         removalPolicyIsDestroy: config.removalPolicy === RemovalPolicy.DESTROY,
+        logRetention: config.logRetentionDays,
+        tracingEnabled: true,
       });
 
       // Grants de IAM (ADR-014) -- ninguno existia antes de Fase 3b. Cada
@@ -263,9 +270,13 @@ export class ComputeStack extends Stack {
         NOTIFICATIONS_SERVICE_URL: cloudMapUrl('notifications'),
         EMF_ENABLED: 'true',
         ENV_NAME: config.envName,
+        XRAY_ENABLED: 'true',
+        XRAY_SAMPLING_RATE: String(config.xraySamplingRate),
       },
       alarmTopic,
       removalPolicyIsDestroy: config.removalPolicy === ('destroy' as never),
+      logRetention: config.logRetentionDays,
+      tracingEnabled: true,
     });
 
     this.services = services;

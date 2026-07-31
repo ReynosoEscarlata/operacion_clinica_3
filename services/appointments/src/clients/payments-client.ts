@@ -1,6 +1,8 @@
+import { XRAY_TRACE_HEADER } from '@clinica/observability';
+
 import { AppError } from '../lib/app-error.js';
 import { REQUEST_ID_HEADER, TENANT_ID_HEADER } from '../lib/constants.js';
-import { getRequestId } from '../lib/request-context.js';
+import { getRequestId, getTraceId } from '../lib/request-context.js';
 import { getTenantId } from '../lib/tenant-context.js';
 
 export interface PaymentIntentResult {
@@ -32,12 +34,17 @@ const PAYMENTS_UNAVAILABLE = (): never => {
   throw new AppError(502, 'PAYMENTS_UNAVAILABLE', 'Servicio de pago no disponible');
 };
 
-// Propaga requestId al servicio downstream (Fase 6, ADR-017) -- sin esto,
-// una llamada síncrona servicio-a-servicio pierde la correlación exacta
-// con la request que la originó.
+// Propaga requestId + trace de X-Ray al servicio downstream (Fase 6,
+// ADR-017) -- sin esto, una llamada síncrona servicio-a-servicio pierde la
+// correlación exacta con la request que la originó, tanto en logs
+// (requestId) como en la consola de X-Ray (trace).
 const correlationHeaders = (): Record<string, string> => {
   const requestId = getRequestId();
-  return requestId ? { [REQUEST_ID_HEADER]: requestId } : {};
+  const traceId = getTraceId();
+  return {
+    ...(requestId ? { [REQUEST_ID_HEADER]: requestId } : {}),
+    ...(traceId ? { [XRAY_TRACE_HEADER]: traceId } : {}),
+  };
 };
 
 export const buildHttpPaymentsClient = (baseUrl: string): PaymentsClient => ({

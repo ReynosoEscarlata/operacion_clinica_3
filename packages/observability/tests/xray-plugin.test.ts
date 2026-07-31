@@ -51,4 +51,26 @@ describe('registerXray', () => {
 
     await app.close();
   });
+
+  it('invoca onTraceHeader con el header X-Amzn-Trace-Id formateado del segmento nuevo', async () => {
+    const app = Fastify();
+    let capturedTraceHeader: string | undefined;
+    await registerXray(app, {
+      enabled: true,
+      serviceName: 'test-service',
+      sampling: { fixedTarget: 1, rate: 1 },
+      getContext: () => ({}),
+      onTraceHeader: (traceHeader) => {
+        capturedTraceHeader = traceHeader;
+      },
+    });
+    app.get('/ping', async () => ({ ok: true }));
+    await app.ready();
+
+    const response = await app.inject({ method: 'GET', url: '/ping' });
+    expect(response.statusCode).toBe(200);
+    expect(capturedTraceHeader).toMatch(/^Root=1-[0-9a-f]+-[0-9a-f]+;Parent=[0-9a-f]+;Sampled=[01]$/);
+
+    await app.close();
+  });
 });

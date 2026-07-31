@@ -1,7 +1,7 @@
 import xRayFastifyPluginImport from 'aws-xray-sdk-fastify';
 import type { FastifyInstance, FastifyPluginAsync } from 'fastify';
 
-import { configureSampling, type XraySamplingConfig } from './xray.js';
+import { configureSampling, formatTraceHeader, type XraySamplingConfig } from './xray.js';
 
 interface XRayFastifyPluginOptions {
   segmentName: string;
@@ -20,8 +20,12 @@ interface XRayFastifyPluginOptions {
 const xRayFastifyPlugin = xRayFastifyPluginImport as unknown as FastifyPluginAsync<XRayFastifyPluginOptions>;
 
 export interface XrayContext {
-  tenantId?: string | null;
-  requestId?: string;
+  // `| undefined` explícito -- mismo motivo que en emf.ts: exactOptionalPropertyTypes
+  // exige que el tipo declarado incluya `undefined` cuando el caller pasa el
+  // resultado directo de getTenantId()/getRequestId() (que devuelven
+  // `T | undefined` cuando no hay contexto ambiental) en vez de omitir la clave.
+  tenantId?: string | null | undefined;
+  requestId?: string | undefined;
 }
 
 export interface RegisterXrayOptions {
@@ -33,6 +37,11 @@ export interface RegisterXrayOptions {
   // paquete no puede importarlos directo, así que el caller (app.ts de cada
   // servicio) pasa una función que lee su propio contexto ambiental.
   getContext: () => XrayContext;
+  // Simétrico a `getContext`: el segmento nace acá (onRequest, modo manual),
+  // pero solo el caller sabe dónde guardar el trace header para que los
+  // clientes HTTP síncronos (doctors-client.ts, payments-client.ts) lo lean
+  // ambientalmente más tarde en el mismo request.
+  onTraceHeader?: (traceHeader: string) => void;
 }
 
 // Anotaciones (indexables/filtrables en la consola de X-Ray): tenantId,
@@ -67,6 +76,9 @@ export const registerXray = async (app: FastifyInstance, options: RegisterXrayOp
     segment.addAnnotation('service', options.serviceName);
     if (context.requestId) segment.addAnnotation('requestId', context.requestId);
     if (context.tenantId) segment.addAnnotation('tenantId', context.tenantId);
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Segment no está tipado en aws-xray-sdk-core
+    options.onTraceHeader?.(formatTraceHeader(segment as any));
   });
 
   app.addHook('onResponse', async (request, reply) => {

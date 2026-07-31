@@ -26,6 +26,13 @@ export interface ClinicServiceProps {
   autoscalingQueue?: sqs.IQueue;
   alarmTopic?: sns.ITopic;
   removalPolicyIsDestroy: boolean;
+  // Fase 6 (ADR-017): retención por entorno (infra/config/environments.ts)
+  // -- reemplaza el ONE_MONTH fijo que existía antes de esta fase.
+  logRetention: logs.RetentionDays;
+  // Sidecar xray-daemon (ver más abajo). `false` no agrega el contenedor ni
+  // el grant de IAM -- el env var XRAY_ENABLED de la app puede seguir en
+  // `false` independientemente (doble apagado, ver env.ts de cada servicio).
+  tracingEnabled: boolean;
 }
 
 // Construct reutilizable que encapsula task definition + service + target
@@ -43,13 +50,17 @@ export class ClinicService extends Construct {
   // SNS/SQS/Scheduler por servicio (ADR-014) sin que este construct necesite
   // saber nada de mensajeria.
   public readonly taskRole: iam.IRole;
+  // Fase 6 (ADR-017): expuesto para que observability-stack.ts pueda crear
+  // un logs.MetricFilter por servicio (detección de acceso cross-tenant)
+  // sin que este construct necesite saber nada de seguridad/metric filters.
+  public readonly logGroup: logs.LogGroup;
 
   constructor(scope: Construct, id: string, props: ClinicServiceProps) {
     super(scope, id);
 
-    const logGroup = new logs.LogGroup(this, 'LogGroup', {
+    this.logGroup = new logs.LogGroup(this, 'LogGroup', {
       logGroupName: `/clinica/${props.serviceName}`,
-      retention: logs.RetentionDays.ONE_MONTH,
+      retention: props.logRetention,
       removalPolicy: props.removalPolicyIsDestroy ? RemovalPolicy.DESTROY : RemovalPolicy.RETAIN,
     });
 
@@ -59,13 +70,43 @@ export class ClinicService extends Construct {
     });
     this.taskRole = taskDefinition.taskRole;
 
+    // Sidecar del X-Ray daemon (ADR-017): recibe trazas por UDP en 2000 y
+    // las reenvía a la API de X-Ray -- así el proceso de la app nunca llama
+    // a la API directo (menos IAM, menos latencia en el request). Mismo
+    // namespace de red que el contenedor de la app (una sola task Fargate),
+    // por eso AWS_XRAY_DAEMON_ADDRESS abajo apunta a 127.0.0.1.
+    // essential:false: si el daemon muere, la app sigue sirviendo tráfico
+    // (X-Ray es observabilidad, nunca debe tumbar el servicio).
+    if (props.tracingEnabled) {
+      taskDefinition.addContainer('XrayDaemon', {
+        containerName: 'xray-daemon',
+        image: ecs.ContainerImage.fromRegistry('public.ecr.aws/xray/aws-xray-daemon:latest'),
+        cpu: 32,
+        memoryReservationMiB: 32,
+        essential: false,
+        portMappings: [{ containerPort: 2000, protocol: ecs.Protocol.UDP }],
+        logging: ecs.LogDrivers.awsLogs({ streamPrefix: 'xray-daemon', logGroup: this.logGroup }),
+      });
+
+      // Sin resource-level: la API de X-Ray no soporta scoping por ARN en
+      // estas 3 acciones (confirmado en la doc de IAM de X-Ray).
+      taskDefinition.taskRole.addToPrincipalPolicy(
+        new iam.PolicyStatement({
+          actions: ['xray:PutTraceSegments', 'xray:PutTelemetryRecords', 'xray:GetSamplingRules'],
+          resources: ['*'],
+        }),
+      );
+    }
+
     taskDefinition.addContainer('Container', {
       containerName: props.serviceName,
       image: ecs.ContainerImage.fromEcrRepository(props.repository, 'latest'),
       portMappings: [{ containerPort: props.containerPort }],
-      environment: props.environment,
+      environment: props.tracingEnabled
+        ? { ...props.environment, AWS_XRAY_DAEMON_ADDRESS: '127.0.0.1:2000', AWS_XRAY_CONTEXT_MISSING: 'LOG_ERROR' }
+        : props.environment,
       secrets: props.secrets,
-      logging: ecs.LogDrivers.awsLogs({ streamPrefix: props.serviceName, logGroup }),
+      logging: ecs.LogDrivers.awsLogs({ streamPrefix: props.serviceName, logGroup: this.logGroup }),
     });
 
     this.taskSecurityGroup = new ec2.SecurityGroup(this, 'TaskSg', {
