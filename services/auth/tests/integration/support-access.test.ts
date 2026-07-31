@@ -26,12 +26,11 @@ describe('POST /v1/auth/support-access (integración con DB real)', () => {
   });
 
   afterAll(async () => {
-    await withTenantId(
-      prisma,
-      null,
-      (tx) => tx.supportAccessGrant.deleteMany({ where: { actorId: ACTOR_ID } }),
-      'platform_admin',
-    );
+    // Fase 5: app_role ya no tiene DELETE sobre SupportAccessGrant (fix de
+    // privilegios, ver 20260731020000_fix_support_access_grant_privileges
+    // -- la tabla es append-only de verdad ahora, no solo por convención).
+    // La limpieza por DELETE ya no es posible desde el cliente de la app;
+    // las filas de prueba quedan, igual que en tests/integration/audit-log.test.ts.
     await app.close();
     await prisma.$disconnect();
   });

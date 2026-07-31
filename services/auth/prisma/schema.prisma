@@ -94,6 +94,33 @@ model SupportAccessGrant {
   @@index([expiresAt])
 }
 
+// Audit log inmutable (Fase 5, ADR-013): append-only por privilegio de
+// motor (app_role solo tiene SELECT/INSERT, ver migración SQL -- NUNCA
+// UPDATE/DELETE, ni siquiera por convención de la app como SupportAccessGrant
+// terminó dependiendo por error, ver el fix en esta misma fase). Sin
+// hash-chaining (decisión consciente de ADR-013): la garantía de
+// inmutabilidad depende enteramente de que app_role no pueda modificar filas
+// ya escritas. `timestamp` es `createdAt` -- Prisma lo pone, nunca el
+// llamador de writeAuditLog().
+model AuditLog {
+  id            String   @id @default(uuid()) @db.Uuid
+  createdAt     DateTime @default(now())
+  tenantId      String?  @db.Uuid
+  actorId       String?
+  actorRole     String?
+  action        String
+  resourceType  String
+  resourceId    String?
+  ip            String?
+  userAgent     String?
+  correlationId String?
+  result        String
+  justification String?
+
+  @@index([tenantId, createdAt])
+  @@index([resourceType, resourceId])
+}
+
 // Outbox (ADR-002-transacciones-distribuidas.md): UserCreated/UserDeactivated
 // se escriben aquí en la misma transacción que el cambio de User. tenantId
 // nullable, igual que User (un evento de un usuario de plataforma no tiene
