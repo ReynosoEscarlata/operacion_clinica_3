@@ -24,12 +24,24 @@ export interface ListPatientsParams {
 
 export type PatientWithAppointments = Patient & { appointments: Appointment[] };
 
+export interface OrphanedPatientCandidate {
+  id: string;
+  tenantId: string;
+}
+
 export interface PatientRepository {
   create: (data: CreatePatientData) => Promise<Patient>;
   findByEmail: (email: string) => Promise<Patient | null>;
   findById: (id: string) => Promise<PatientWithAppointments | null>;
   update: (id: string, data: UpdatePatientData) => Promise<Patient | null>;
   list: (params: ListPatientsParams) => Promise<Patient[]>;
+  deleteHard: (id: string) => Promise<void>;
+  /**
+   * Escaneo CROSS-TENANT deliberado (Fase 5, ADR-016, list_orphaned_patients):
+   * el job de purga de retención necesita candidatos en TODOS los tenants.
+   * Solo id+tenantId, el caller resuelve el tenant antes de borrar.
+   */
+  listOrphaned: () => Promise<OrphanedPatientCandidate[]>;
 }
 
 // Patient es dato privado por tenant (a diferencia del directorio de
@@ -119,6 +131,16 @@ export class PrismaPatientRepository implements PatientRepository {
         orderBy: { createdAt: 'asc' },
       }),
     );
+  }
+
+  async deleteHard(id: string): Promise<void> {
+    await withTenant(this.prisma, (tx) => tx.patient.delete({ where: { id } }));
+  }
+
+  async listOrphaned(): Promise<OrphanedPatientCandidate[]> {
+    return this.prisma.$queryRaw<OrphanedPatientCandidate[]>`
+      SELECT id, "tenantId" FROM list_orphaned_patients()
+    `;
   }
 }
 

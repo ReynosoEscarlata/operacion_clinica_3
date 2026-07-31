@@ -75,6 +75,14 @@ export interface AppointmentRepository {
    * de su propio runWithTenant antes de leer cualquier otro dato.
    */
   listRemindedBefore: (cutoff: Date) => Promise<ReminderCandidate[]>;
+  /**
+   * Escaneo CROSS-TENANT deliberado (Fase 5, ADR-016,
+   * list_appointments_before_retention_cutoff): el job de purga de
+   * retención necesita candidatos en TODOS los tenants. Mismo contrato que
+   * listRemindedBefore -- solo id+tenantId, el caller resuelve el tenant
+   * antes de borrar.
+   */
+  listBeforeRetentionCutoff: (cutoff: Date) => Promise<ReminderCandidate[]>;
 }
 
 const MAX_LIST_RESULTS = 200;
@@ -324,6 +332,12 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
   async listRemindedBefore(cutoff: Date): Promise<ReminderCandidate[]> {
     return this.prisma.$queryRaw<ReminderCandidate[]>`
       SELECT id, "tenantId" FROM list_reminded_appointments_before(${cutoff})
+    `;
+  }
+
+  async listBeforeRetentionCutoff(cutoff: Date): Promise<ReminderCandidate[]> {
+    return this.prisma.$queryRaw<ReminderCandidate[]>`
+      SELECT id, "tenantId" FROM list_appointments_before_retention_cutoff(${cutoff})
     `;
   }
 }
