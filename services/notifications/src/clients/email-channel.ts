@@ -14,7 +14,10 @@ export class EmailChannel implements NotificationChannel {
 
   async send(message: NotificationMessage): Promise<void> {
     if (env.NODE_ENV === 'development') {
-      this.logger.info({ to: message.to, subject: message.subject }, 'Email (development mode)');
+      // Fase 5 (ADR-013): nunca loguear el email destinatario en texto
+      // plano, ni en desarrollo -- el requestId ya correlaciona el envío
+      // con el resto de los logs de la request sin necesidad de exponer PII.
+      this.logger.info({ subjectLength: message.subject.length }, 'Email (development mode)');
       return;
     }
 

@@ -55,10 +55,10 @@ export class PatientService {
         stripeCustomerId: customer.id,
       });
 
-      this.logger.info(
-        { patientId: patient.id, stripeCustomerId: customer.id },
-        'Paciente creado con Stripe Customer asociado (vía Payments)',
-      );
+      // Fase 5 (ADR-013): stripeCustomerId es un identificador financiero
+      // (PII, ver docs/baseline-challenge-4.md) -- no se loguea en texto
+      // plano, ni siquiera junto a un id interno no sensible.
+      this.logger.info({ patientId: patient.id }, 'Paciente creado con Stripe Customer asociado (vía Payments)');
 
       return patient;
     });
