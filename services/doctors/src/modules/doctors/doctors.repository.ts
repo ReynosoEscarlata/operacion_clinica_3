@@ -1,5 +1,6 @@
 import type { Availability, Doctor, PrismaClient } from '@prisma/client';
 
+import { writeAuditLog } from '../../lib/audit-log.js';
 import { writeOutboxEvent } from '../../lib/outbox.js';
 import { getTenantId } from '../../lib/tenant-context.js';
 import { withTenant } from '../../lib/tenant-scoped.js';
@@ -71,6 +72,7 @@ export class PrismaDoctorRepository implements DoctorRepository {
         name: doctor.name,
         specialtyId: doctor.specialtyId,
       });
+      await writeAuditLog(tx, 'doctor.created', 'doctor', doctor.id, 'success');
 
       return doctor;
     });
@@ -119,6 +121,7 @@ export class PrismaDoctorRepository implements DoctorRepository {
         name: doctor.name,
         specialtyId: doctor.specialtyId,
       });
+      await writeAuditLog(tx, 'doctor.updated', 'doctor', doctor.id, 'success');
 
       return availability;
     });

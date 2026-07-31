@@ -59,6 +59,32 @@ model Availability {
   @@index([tenantId, doctorId])
 }
 
+// Audit log inmutable (Fase 5, ADR-013): append-only por privilegio de
+// motor (app_role solo tiene SELECT/INSERT, ver migración SQL). Sin
+// hash-chaining (decisión consciente de ADR-013). tenantId NOT NULL, mismo
+// criterio que Doctor/Availability -- solo se audita create/addAvailability
+// (mutaciones, siempre con tenant resuelto); el directorio público de
+// doctores (findById/findAll, sin contexto de tenant) queda fuera, igual
+// que list/paginación en el resto de los servicios.
+model AuditLog {
+  id            String   @id @default(uuid()) @db.Uuid
+  createdAt     DateTime @default(now())
+  tenantId      String   @db.Uuid
+  actorId       String?
+  actorRole     String?
+  action        String
+  resourceType  String
+  resourceId    String?
+  ip            String?
+  userAgent     String?
+  correlationId String?
+  result        String
+  justification String?
+
+  @@index([tenantId, createdAt])
+  @@index([resourceType, resourceId])
+}
+
 // Outbox (ADR-002): DoctorCreated/DoctorUpdated se escriben en la misma
 // transacción que el cambio. El relay (SQS/SNS, Fase 3b, ADR-014) los
 // publica; Appointments los consulta vía HTTP síncrono para slots (ADR-001,
