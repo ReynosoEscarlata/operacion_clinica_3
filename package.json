@@ -11,7 +11,8 @@
     "gateway",
     "packages/authz",
     "packages/messaging",
-    "packages/audit-log"
+    "packages/audit-log",
+    "packages/observability"
   ],
   "scripts": {
     "dev": "tsx watch src/server.ts",
