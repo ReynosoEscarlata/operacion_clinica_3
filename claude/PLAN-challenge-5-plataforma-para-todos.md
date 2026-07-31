@@ -156,9 +156,14 @@ es una excepción, es la región de todo el proyecto. **Pendiente, fuera de alca
 de `mx-central-1` (marcado explícitamente en ambos documentos) — una nueva pasada de verificación
 de precios contra `us-east-1` queda para quien retome el cost model.
 
+**Actualización (2026-07-31):** se verificaron contra la AWS Price List Bulk API los precios de
+X-Ray y `GetMetricData` que quedaban NO VERIFICADO al cierre inicial de esta fase (ver
+`docs/cost/precios-aws-consultados.md` sección 12) — ya no son una pregunta abierta.
+
 **Fuera de alcance de esta fase:** redacción real de PII en logs (dependencia de Fase 5, ya
-resuelta en paralelo); precio verificado de X-Ray y `GetMetricData` (**NO VERIFICADO**, nunca se
-consultó la Price List API real para estos dos); umbrales de alarma (error rate, p95, conexiones
+resuelta en paralelo); recalcular el resto del cost model (§3.1-3.4, 3.6-3.12) contra precios de
+`us-east-1` (sigue calculado sobre `mx-central-1`, fuera de alcance de ADR-018 también); umbrales
+de alarma (error rate, p95, conexiones
 RDS) calibrados sin tráfico real, marcados explícitamente como valores de arranque a recalibrar.
 
 **Sobre "por tenant y agregado" del criterio de aceptación (Alcance, punto 4):** el DoD se cumple

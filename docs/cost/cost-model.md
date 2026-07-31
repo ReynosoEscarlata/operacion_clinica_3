@@ -134,36 +134,52 @@ Este es el recurso donde efectivamente aparece "la sorpresa clásica" de logs �
 
 #### 3.5.1 X-Ray (trazas distribuidas, Fase 6)
 
-**NO VERIFICADO** — precio de X-Ray nunca confirmado contra el catálogo real de AWS
-(`docs/cost/precios-aws-consultados.md` no lo incluye entre los 11 servicios verificados de Fase
-1). AWS documenta $5.00 por millón de trazas registradas + $0.50 por millón de trazas recuperadas/
-escaneadas (más allá de la franquicia gratuita de 100,000 trazas/mes), pero esa cifra no pasó por
-el mismo proceso de verificación que el resto de este documento — tratar como referencia, no como
-número comprometido. Con sampling `fixed_target=1, rate=1` en dev/staging (traza el 100%, tráfico
-bajo) y `fixed_target=1, rate=0.05` en prod (`infra/config/environments.ts`), el volumen de trazas
-en el escenario de 10 clínicas (300,000 requests/mes, prod) sería ~15,750 trazas/mes — dentro de
-la franquicia gratuita citada, sin costo. A 1000 clínicas (30,000,000 requests/mes) serían
-~1,500,750 trazas/mes, con un costo aproximado de referencia de ~$7/mes si la tarifa citada arriba
-es correcta — de nuevo, **NO VERIFICADO**.
+**Verificado contra la AWS Price List Bulk API** (misma metodología que el resto de este
+documento — ver `docs/cost/precios-aws-consultados.md` sección 12 para el detalle de SKUs/fuente).
+Idéntico en `us-east-1` y `mx-central-1`: **$5.00 por millón de trazas almacenadas** (franquicia
+gratuita: 100,000 trazas/mes) + **$0.50 por millón de trazas recuperadas/escaneadas** (franquicia
+gratuita: 1,000,000/mes). Con sampling `fixed_target=1, rate=0.05` en prod
+(`infra/config/environments.ts`) y asumiendo que las trazas recuperadas quedan dentro de la
+franquicia gratuita (uso bajo, sin tráfico real todavía que lo contradiga):
+
+| Escenario | Requests/mes (prod) | Trazas almacenadas (×0.05) | Sobre franquicia (100k) | Costo X-Ray |
+|---|---|---|---|---|
+| 10 clínicas | 300,000 | 15,000 | No | **$0.00** |
+| 100 clínicas | 3,000,000 | 150,000 | 50,000 | 50,000 × $0.000005 = **$0.25** |
+| 1000 clínicas | 30,000,000 | 1,500,000 | 1,400,000 | 1,400,000 × $0.000005 = **$7.00** |
+
+No incluido en los totales de §3.13 (impacto marginal, $0-$7/mes según escenario) — se deja como
+referencia aparte para no perturbar los totales ya aprobados en Gate 1 por una cifra que en el
+peor caso (1000 clínicas) es <0.5% del total.
 
 #### 3.5.2 CloudWatch GetMetricData (dashboard ejecutivo, Fase 6)
 
-**NO VERIFICADO** — mismo motivo que X-Ray. El endpoint `GET /v1/platform/metrics`
+**Verificado contra la AWS Price List Bulk API** (`us-east-1`, SKU `ST83NCNZMVRKWEVJ`, ver
+`precios-aws-consultados.md` sección 12): **$0.01 por cada 1,000 métricas solicitadas** vía
+`GetMetricData` (sin franquicia gratuita para este operation específico, a diferencia del resto de
+CloudWatch). El endpoint `GET /v1/platform/metrics`
 (`services/appointments/src/lib/platform-metrics.ts`) cachea 60s en proceso, así que el volumen de
-llamadas a `GetMetricData` está acotado por visitas al dashboard ejecutivo, no por tráfico de la
-plataforma — 18 métricas solicitadas por llamada (3 × 6 servicios), como mucho una llamada cada 60
-segundos si el dashboard queda abierto permanentemente (1,440 llamadas/día × 18 métricas =
-25,920 métricas-consulta/día, ~777,600/mes). AWS cobra por métrica solicitada, no por llamada — la
-cifra de referencia (no verificada) es del orden de unos pocos dólares/mes en el uso esperado
-(un panel abierto ocasionalmente por un rol de plataforma, no tráfico constante).
+llamadas está acotado por visitas al dashboard ejecutivo, no por tráfico de la plataforma — 18
+métricas solicitadas por llamada (3 × 6 servicios):
 
-**Nota sobre región (ADR-018):** las tres tablas de esta sección (y el resto de §3) se calcularon
-contra precios de `mx-central-1`. La plataforma migró a `us-east-1` después de que este documento
-se escribió (ADR-018, 2026-07-31) — los números de esta sección **no fueron re-verificados** contra
-`us-east-1` como parte de esa migración (alcance explícito de ADR-018: "solo la región, no todo el
-cost model"). Los órdenes de magnitud relativos entre escenarios siguen siendo válidos como
-referencia; los montos absolutos requieren una nueva pasada de verificación de precios contra
-`us-east-1` antes de comprometerlos de nuevo en un Gate.
+| Patrón de uso | Llamadas/mes | Métricas solicitadas/mes | Costo GetMetricData |
+|---|---|---|---|
+| Peor caso: dashboard abierto 24/7, refrescando cada 60s (satura el caché) | 43,200 (1,440/día × 30) | 777,600 | 777,600 × $0.00001 = **$7.78/mes** |
+| Uso esperado: un rol de plataforma revisa el panel unas 10 veces/día | 300 | 5,400 | 5,400 × $0.00001 = **$0.05/mes** |
+
+No incluido en los totales de §3.13 por el mismo motivo que X-Ray (impacto marginal incluso en el
+peor caso, y depende de un patrón de uso humano, no de tráfico de la plataforma).
+
+**Nota sobre región (ADR-018):** las tres tablas de la sección 3.5 (logs/métricas/dashboards) y el
+resto de §3 (Fargate, RDS, SQS, etc.) siguen calculadas contra precios de `mx-central-1` — la
+plataforma migró a `us-east-1` después de que ese contenido se escribió (ADR-018, 2026-07-31), y
+esa migración **no re-verificó** el resto del cost model (alcance explícito de ADR-018: "solo la
+región, no todo el cost model"). Las dos subsecciones nuevas de esta fase (3.5.1 y 3.5.2, arriba)
+son la excepción: se verificaron directamente contra `us-east-1` por ser contenido nuevo de esta
+misma fase, ya con la región correcta. Los órdenes de magnitud relativos entre escenarios del resto
+de §3 siguen siendo válidos como referencia; los montos absolutos de esas secciones (no las de
+X-Ray/GetMetricData) requieren una nueva pasada de verificación contra `us-east-1` antes de
+comprometerlos de nuevo en un Gate.
 
 ### 3.6 Cognito (1 pool compartido, ADR-011)
 

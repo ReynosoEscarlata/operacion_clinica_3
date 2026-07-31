@@ -210,17 +210,38 @@ Idéntico en ambas regiones.
 
 ---
 
-## 12. X-Ray y CloudWatch GetMetricData (Fase 6, ADR-017) — NO VERIFICADO
+## 12. X-Ray y CloudWatch GetMetricData (Fase 6, ADR-017)
 
-A diferencia de los 11 servicios de arriba, estos dos **no se consultaron contra la AWS Price
-List Bulk API** en esta sesión — no hay archivo JSON descargado ni URL de fuente que citar. Las
-cifras usadas como referencia en `docs/cost/cost-model.md` §3.5.1/§3.5.2 ($5.00/millón de trazas
-registradas + $0.50/millón recuperadas para X-Ray; sin cifra concreta para `GetMetricData`, cobrado
-por métrica solicitada) provienen de memoria/documentación general de AWS, **no de una consulta
-verificada como el resto de este documento**. Antes de comprometer estos números en un Gate,
-repetir el mismo proceso que produjo las secciones 1-11: descargar el offer file de
-`AWSXRay`/`AmazonCloudWatch` (el de `GetMetricData` específicamente, no solo el de logs/métricas
-ya cubierto en la sección 6) para la región vigente y extraer el precio real.
+**Verificado** — a diferencia de la primera versión de esta sección (que marcaba estos dos como
+NO VERIFICADO, sin haber consultado la Price List API), se repitió el mismo proceso que produjo
+las secciones 1-11 y se confirmaron los precios reales para `us-east-1` (región vigente desde
+ADR-018).
+
+### X-Ray
+
+| Recurso | Precio unitario | Región | Fuente (URL) | Fecha de consulta |
+|---|---|---|---|---|
+| Trazas almacenadas, primeras 100,000/mes | $0.00 (franquicia gratuita) | us-east-1 | https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AWSXRay/20250828153810/us-east-1/index.json | 2026-07-31 |
+| Trazas almacenadas, después de la franquicia | $5.00 / millón (SKU `Y6TW3M2TDT7SJYK8`) | us-east-1 | (misma fuente) | 2026-07-31 |
+| Trazas recuperadas/escaneadas, primer millón/mes | $0.00 (franquicia gratuita) | us-east-1 | (misma fuente) | 2026-07-31 |
+| Trazas recuperadas/escaneadas, después de la franquicia | $0.50 / millón (SKU `G7U2U9R3GDETG8JR`) | us-east-1 | (misma fuente) | 2026-07-31 |
+| Trazas de X-Ray Insights procesadas (no usado en este proyecto) | $1.00 / millón (SKU `HS3H5YK4VAVS25TN`) | us-east-1 | (misma fuente) | 2026-07-31 |
+
+Idéntico en `mx-central-1` (mismos 3 precios, SKUs `DFM4QSW79RJ6DPRK`/`8XASN3NBW89FKJ3T`/
+`FGJJG8RWW54728PM`, verificado el mismo día contra
+`.../AWSXRay/20250828153810/mx-central-1/index.json`) — X-Ray nunca fue el riesgo de
+disponibilidad que ADR-017 sospechaba; el archivo de precios de `mx-central-1` para X-Ray existía
+desde el principio, el problema real (ADR-018) fue que la región completa no estaba habilitada en
+la cuenta sandbox, no un gap específico de este servicio.
+
+### CloudWatch GetMetricData
+
+| Recurso | Precio unitario | Región | Fuente (URL) | Fecha de consulta |
+|---|---|---|---|---|
+| Métricas solicitadas vía `GetMetricData` (API Bulk) | $0.01 / 1,000 métricas (SKU `ST83NCNZMVRKWEVJ`, sin franquicia gratuita para este operation) | us-east-1 | https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonCloudWatch/20260729191940/us-east-1/index.json | 2026-07-31 |
+
+No se verificó el precio equivalente en `mx-central-1` para este SKU específico — dado ADR-018, ya
+no es la región operativa del proyecto y no vale la pena el tiempo de verificación adicional.
 
 ---
 
@@ -246,6 +267,5 @@ ya cubierto en la sección 6) para la región vigente y extraer el precio real.
    representan la región operativa real — pendiente una nueva pasada de verificación contra
    `us-east-1` (alcance explícito de ADR-018: no se hizo como parte de ese cambio).
 
-7. **X-Ray y `GetMetricData` (Fase 6) nunca se verificaron.** Ver sección 12 arriba — las cifras
-   usadas en `cost-model.md` §3.5.1/§3.5.2 son de memoria, no de una consulta a la Price List API
-   como el resto de este documento. Pendiente antes de comprometerlas en un Gate.
+7. ~~X-Ray y `GetMetricData` (Fase 6) nunca se verificaron.~~ **Resuelto (2026-07-31):** ver
+   sección 12 arriba — ambos verificados contra la Price List API real de `us-east-1`.
