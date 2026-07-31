@@ -5,6 +5,7 @@ import type { PaymentsClient } from '../../clients/payments-client.js';
 import { AppError } from '../../lib/app-error.js';
 import type { Logger } from '../../lib/logger.js';
 import { prisma as defaultPrisma } from '../../config/prisma.js';
+import { auditCrossTenantMismatch } from '../../lib/security-audit.js';
 import { getTenantId, runWithTenant } from '../../lib/tenant-context.js';
 import { resolveTenantForAppointment } from '../../lib/tenant-scoped.js';
 import type { PatientRepository } from '../patients/patients.repository.js';
@@ -119,9 +120,13 @@ export class AppointmentService {
   // ambiental (paciente sin cuenta) se resuelve desde la propia fila
   // (riesgo residual ya aceptado en el threat model, amenaza #3).
   async getById(id: string): Promise<AppointmentWithEvents> {
-    if (getTenantId()) {
+    const ambientTenantId = getTenantId();
+    if (ambientTenantId) {
       const appointment = await this.repository.findById(id);
       if (!appointment) {
+        await auditCrossTenantMismatch(this.logger, 'appointment', id, ambientTenantId, () =>
+          resolveTenantForAppointment(defaultPrisma, id),
+        );
         throw new AppError(404, 'APPOINTMENT_NOT_FOUND', 'Cita no encontrada');
       }
       return appointment;
@@ -186,6 +191,12 @@ export class AppointmentService {
   ): Promise<CancelAppointmentResult> {
     const appointment = await this.repository.findById(id);
     if (!appointment) {
+      const ambientTenantId = getTenantId();
+      if (ambientTenantId) {
+        await auditCrossTenantMismatch(this.logger, 'appointment', id, ambientTenantId, () =>
+          resolveTenantForAppointment(defaultPrisma, id),
+        );
+      }
       throw new AppError(404, 'APPOINTMENT_NOT_FOUND', 'Cita no encontrada');
     }
 

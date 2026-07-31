@@ -4,6 +4,7 @@ import type { DoctorsClient } from '../../clients/doctors-client.js';
 import type { PaymentsClient } from '../../clients/payments-client.js';
 import { AppError } from '../../lib/app-error.js';
 import type { Logger } from '../../lib/logger.js';
+import { auditCrossTenantMismatch } from '../../lib/security-audit.js';
 import { getTenantId, runWithTenant } from '../../lib/tenant-context.js';
 import { resolveTenantForPatient } from '../../lib/tenant-scoped.js';
 import { prisma as defaultPrisma } from '../../config/prisma.js';
@@ -80,6 +81,9 @@ export class PatientService {
     if (ambientTenantId) {
       const patient = await this.repository.findById(id);
       if (!patient) {
+        await auditCrossTenantMismatch(this.logger, 'patient', id, ambientTenantId, () =>
+          resolveTenantForPatient(defaultPrisma, id),
+        );
         throw new AppError(404, 'PATIENT_NOT_FOUND', 'Paciente no encontrado');
       }
       return patient;
@@ -145,7 +149,7 @@ export class PatientService {
     };
 
     if (ambientTenantId) {
-      return build();
+      return this.runAmbientWithAudit(ambientTenantId, id, build);
     }
 
     const tenantId = await resolveTenantForPatient(defaultPrisma, id);
@@ -168,7 +172,7 @@ export class PatientService {
     };
 
     if (ambientTenantId) {
-      return run();
+      return this.runAmbientWithAudit(ambientTenantId, id, run);
     }
 
     const tenantId = await resolveTenantForPatient(defaultPrisma, id);
@@ -193,7 +197,7 @@ export class PatientService {
     };
 
     if (ambientTenantId) {
-      return run();
+      return this.runAmbientWithAudit(ambientTenantId, id, run);
     }
 
     const tenantId = await resolveTenantForPatient(defaultPrisma, id);
@@ -201,6 +205,28 @@ export class PatientService {
       throw new AppError(404, 'PATIENT_NOT_FOUND', 'Paciente no encontrado');
     }
     return runWithTenant(tenantId, run);
+  }
+
+  // Envoltorio para las rutas ARCO (getArcoExport/requestCancellation/
+  // setOptOut): todas comparten el mismo shape ambient-first, y todas
+  // exponen a un admin autenticado exactamente el mismo riesgo de acceso
+  // cross-tenant que getById -- capturar el 404 acá evita repetir el
+  // try/catch en cada una.
+  private async runAmbientWithAudit<T>(
+    ambientTenantId: string,
+    id: string,
+    fn: () => Promise<T>,
+  ): Promise<T> {
+    try {
+      return await fn();
+    } catch (error) {
+      if (error instanceof AppError && error.code === 'PATIENT_NOT_FOUND') {
+        await auditCrossTenantMismatch(this.logger, 'patient', id, ambientTenantId, () =>
+          resolveTenantForPatient(defaultPrisma, id),
+        );
+      }
+      throw error;
+    }
   }
 
   async list(query: ListPatientsQueryDto): Promise<ListPatientsResult> {

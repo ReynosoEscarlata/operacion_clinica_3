@@ -1,8 +1,21 @@
+import { logAuthzDenied, type Logger } from '@clinica/observability';
 import type { FastifyInstance, FastifyReply, FastifyRequest, preHandlerHookHandler } from 'fastify';
 
 import type { AuthActor } from './actor.js';
 import { can } from './can.js';
 import type { Permission } from './permissions.js';
+
+// `request.log` ya es un child logger con `{ service: '<nombre>' }` como
+// binding (ver lib/logger.ts + middleware/request-id.ts de cada servicio,
+// que hace `logger.child({ requestId })`) -- este paquete es compartido
+// entre los 6 procesos y no puede saber su propio nombre de servicio de
+// antemano, así que lo lee de ahí en vez de hardcodearlo (evita
+// sobreescribir el binding real con un valor genérico al pasar `service`
+// explícito en la llamada de log).
+const resolveServiceName = (logger: Logger): string => {
+  const bindings = logger.bindings?.();
+  return typeof bindings?.service === 'string' ? bindings.service : 'unknown';
+};
 
 declare module 'fastify' {
   interface FastifyRequest {
@@ -36,12 +49,26 @@ export const requirePermission = (
   async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
     if (!request.authActor) {
       if (options.allowAnonymous) return;
+      logAuthzDenied(request.log, {
+        service: resolveServiceName(request.log),
+        permission,
+        actorRole: 'anonimo',
+        actorSub: null,
+        actorTenantId: null,
+      });
       await reply.status(403).send({
         error: { code: 'FORBIDDEN', message: `Permiso requerido: ${permission}`, requestId: request.id },
       });
       return;
     }
     if (!can(request.authActor, permission)) {
+      logAuthzDenied(request.log, {
+        service: resolveServiceName(request.log),
+        permission,
+        actorRole: request.authActor.role,
+        actorSub: request.authActor.sub,
+        actorTenantId: request.authActor.tenantId,
+      });
       await reply.status(403).send({
         error: { code: 'FORBIDDEN', message: `Permiso requerido: ${permission}`, requestId: request.id },
       });

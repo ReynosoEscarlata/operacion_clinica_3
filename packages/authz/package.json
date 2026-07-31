@@ -20,6 +20,9 @@
     "lint": "eslint . --ext .ts",
     "typecheck": "tsc --noEmit -p tsconfig.eslint.json"
   },
+  "dependencies": {
+    "@clinica/observability": "^0.1.0"
+  },
   "peerDependencies": {
     "fastify": "^4.28.1"
   },

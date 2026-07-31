@@ -13,8 +13,12 @@ interface BaseSecurityEvent {
   securityEvent: true;
   severity: SecurityEventSeverity;
   service: string;
-  requestId?: string;
-  traceId?: string;
+  // `| undefined` explícito -- mismo motivo que en emf.ts/xray-plugin.ts:
+  // exactOptionalPropertyTypes exige que el tipo declarado incluya
+  // `undefined` cuando el caller pasa el resultado directo de
+  // getRequestId()/getTraceId() en vez de omitir la clave.
+  requestId?: string | undefined;
+  traceId?: string | undefined;
 }
 
 // Amenaza #3 del threat model (IDOR por posesión de UUID): un tenant
