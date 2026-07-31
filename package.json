@@ -10,7 +10,8 @@
     "services/*",
     "gateway",
     "packages/authz",
-    "packages/messaging"
+    "packages/messaging",
+    "packages/audit-log"
   ],
   "scripts": {
     "dev": "tsx watch src/server.ts",
