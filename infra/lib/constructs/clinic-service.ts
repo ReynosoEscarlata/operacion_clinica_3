@@ -2,6 +2,7 @@ import { Duration, RemovalPolicy } from 'aws-cdk-lib';
 import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import * as ecs from 'aws-cdk-lib/aws-ecs';
 import * as ecr from 'aws-cdk-lib/aws-ecr';
+import * as iam from 'aws-cdk-lib/aws-iam';
 import * as logs from 'aws-cdk-lib/aws-logs';
 import * as sns from 'aws-cdk-lib/aws-sns';
 import * as snsActions from 'aws-cdk-lib/aws-cloudwatch-actions';
@@ -36,6 +37,12 @@ export interface ClinicServiceProps {
 export class ClinicService extends Construct {
   public readonly service: ecs.FargateService;
   public readonly taskSecurityGroup: ec2.SecurityGroup;
+  // Rol de la task (no el de ejecucion) -- lo que asume el codigo de la
+  // aplicacion en runtime vía la cadena de credenciales por defecto del SDK
+  // de AWS. Expuesto para que compute-stack.ts pueda otorgar los grants de
+  // SNS/SQS/Scheduler por servicio (ADR-014) sin que este construct necesite
+  // saber nada de mensajeria.
+  public readonly taskRole: iam.IRole;
 
   constructor(scope: Construct, id: string, props: ClinicServiceProps) {
     super(scope, id);
@@ -50,6 +57,7 @@ export class ClinicService extends Construct {
       cpu: props.cpu,
       memoryLimitMiB: props.memoryLimitMiB,
     });
+    this.taskRole = taskDefinition.taskRole;
 
     taskDefinition.addContainer('Container', {
       containerName: props.serviceName,

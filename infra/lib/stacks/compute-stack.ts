@@ -2,6 +2,7 @@ import { Stack, type StackProps, RemovalPolicy } from 'aws-cdk-lib';
 import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import * as ecs from 'aws-cdk-lib/aws-ecs';
 import * as ecr from 'aws-cdk-lib/aws-ecr';
+import * as iam from 'aws-cdk-lib/aws-iam';
 import * as servicediscovery from 'aws-cdk-lib/aws-servicediscovery';
 import * as sns from 'aws-cdk-lib/aws-sns';
 import * as rds from 'aws-cdk-lib/aws-rds';
@@ -13,6 +14,7 @@ import {
   type EnvironmentConfig,
   type ServiceName,
 } from '../../config/environments.js';
+import { MAX_RECEIVE_COUNTS } from '../../config/messaging-constants.js';
 import { ClinicService } from '../constructs/clinic-service.js';
 import { MessagingStack } from './messaging-stack.js';
 
@@ -103,21 +105,45 @@ export class ComputeStack extends Stack {
         DB_HOST: db.instanceEndpoint.hostname,
         DB_PORT: String(db.instanceEndpoint.port),
         DB_NAME: `${serviceName}_db`,
-        DOMAIN_EVENTS_QUEUE_URL:
-          serviceName === 'appointments'
-            ? messaging.appointmentsDomainEventsQueue.queue.queueUrl
-            : serviceName === 'notifications'
-              ? messaging.notificationsDomainEventsQueue.queue.queueUrl
-              : '',
-        DOMAIN_EVENTS_TOPIC_ARN: messaging.domainEventsTopic.topicArn,
+        // AWS_ENDPOINT_URL/AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY se omiten
+        // a proposito: en AWS real el SDK usa la cadena de credenciales por
+        // defecto (el taskRole otorgado mas abajo), solo LocalStack/dev
+        // necesita esos overrides (ver services/*/src/config/env.ts).
+        AWS_REGION: config.region,
       };
+
+      // Auth/Doctors/Payments solo producen (outbox-relay -> SNS).
+      // Appointments/Notifications además consumen su propia cola. Los
+      // grants de IAM se otorgan mas abajo, una vez creado el taskRole.
+      if (serviceName === 'auth' || serviceName === 'doctors' || serviceName === 'payments') {
+        environment.DOMAIN_EVENTS_TOPIC_ARN = messaging.domainEventsTopic.topicArn;
+      }
+
+      if (serviceName === 'notifications') {
+        environment.NOTIFICATIONS_DOMAIN_EVENTS_QUEUE_URL = messaging.notificationsDomainEventsQueue.queue.queueUrl;
+        environment.NOTIFICATIONS_DOMAIN_EVENTS_DLQ_URL =
+          messaging.notificationsDomainEventsQueue.deadLetterQueue.queueUrl;
+        environment.NOTIFICATIONS_DOMAIN_EVENTS_MAX_RECEIVE_COUNT = String(MAX_RECEIVE_COUNTS.domainEvents);
+      }
 
       if (serviceName === 'appointments') {
         environment.DOCTORS_SERVICE_URL = cloudMapUrl('doctors');
         environment.PAYMENTS_SERVICE_URL = cloudMapUrl('payments');
+        environment.DOMAIN_EVENTS_TOPIC_ARN = messaging.domainEventsTopic.topicArn;
+        environment.APPOINTMENTS_DOMAIN_EVENTS_QUEUE_URL = messaging.appointmentsDomainEventsQueue.queue.queueUrl;
+        environment.APPOINTMENTS_DOMAIN_EVENTS_DLQ_URL =
+          messaging.appointmentsDomainEventsQueue.deadLetterQueue.queueUrl;
+        environment.APPOINTMENTS_DOMAIN_EVENTS_MAX_RECEIVE_COUNT = String(MAX_RECEIVE_COUNTS.domainEvents);
         environment.APPOINTMENT_EXPIRATION_QUEUE_URL = messaging.appointmentExpirationQueue.queue.queueUrl;
+        environment.APPOINTMENT_EXPIRATION_QUEUE_ARN = messaging.appointmentExpirationQueue.queue.queueArn;
+        environment.APPOINTMENT_EXPIRATION_MAX_RECEIVE_COUNT = String(MAX_RECEIVE_COUNTS.appointmentExpiration);
         environment.APPOINTMENT_REMINDERS_QUEUE_URL = messaging.appointmentRemindersQueue.queue.queueUrl;
+        environment.APPOINTMENT_REMINDERS_QUEUE_ARN = messaging.appointmentRemindersQueue.queue.queueArn;
+        environment.APPOINTMENT_REMINDERS_DLQ_URL = messaging.appointmentRemindersQueue.deadLetterQueue.queueUrl;
+        environment.APPOINTMENT_REMINDERS_MAX_RECEIVE_COUNT = String(MAX_RECEIVE_COUNTS.appointmentReminders);
         environment.APPOINTMENT_NOSHOW_QUEUE_URL = messaging.appointmentNoShowQueue.queue.queueUrl;
+        environment.SCHEDULER_GROUP_NAME = messaging.appointmentScheduleGroupName;
+        environment.SCHEDULER_EXECUTION_ROLE_ARN = messaging.schedulerExecutionRole.roleArn;
       }
 
       const clinicService = new ClinicService(this, `${serviceName}Service`, {
@@ -140,6 +166,49 @@ export class ComputeStack extends Stack {
         alarmTopic,
         removalPolicyIsDestroy: config.removalPolicy === RemovalPolicy.DESTROY,
       });
+
+      // Grants de IAM (ADR-014) -- ninguno existia antes de Fase 3b. Cada
+      // servicio recibe exactamente lo que necesita para su propio rol
+      // (productor/consumidor), nunca acceso a las colas de otro servicio.
+      if (serviceName === 'auth' || serviceName === 'doctors' || serviceName === 'payments') {
+        messaging.domainEventsTopic.grantPublish(clinicService.taskRole);
+      }
+
+      if (serviceName === 'notifications') {
+        messaging.notificationsDomainEventsQueue.queue.grantConsumeMessages(clinicService.taskRole);
+        messaging.notificationsDomainEventsQueue.deadLetterQueue.grantConsumeMessages(clinicService.taskRole);
+      }
+
+      if (serviceName === 'appointments') {
+        messaging.domainEventsTopic.grantPublish(clinicService.taskRole);
+        messaging.appointmentsDomainEventsQueue.queue.grantConsumeMessages(clinicService.taskRole);
+        messaging.appointmentsDomainEventsQueue.deadLetterQueue.grantConsumeMessages(clinicService.taskRole);
+        messaging.appointmentExpirationQueue.queue.grantConsumeMessages(clinicService.taskRole);
+        messaging.appointmentRemindersQueue.queue.grantConsumeMessages(clinicService.taskRole);
+        messaging.appointmentRemindersQueue.deadLetterQueue.grantConsumeMessages(clinicService.taskRole);
+        messaging.appointmentNoShowQueue.queue.grantConsumeMessages(clinicService.taskRole);
+
+        // Crea los one-time schedules de expiration/reminders en runtime
+        // (ver enqueueAppointmentExpiration/enqueueAppointmentReminder) --
+        // scoped al ARN del propio grupo, nunca scheduler:* genérico.
+        clinicService.taskRole.addToPrincipalPolicy(
+          new iam.PolicyStatement({
+            actions: ['scheduler:CreateSchedule'],
+            resources: [
+              `arn:aws:scheduler:${config.region}:${config.account}:schedule/${messaging.appointmentScheduleGroupName}/*`,
+            ],
+          }),
+        );
+        // EventBridge Scheduler exige que quien crea el schedule pueda pasarle
+        // su propio execution role al servicio (iam:PassRole) -- sin esto,
+        // CreateSchedule falla en runtime aunque el rol ya exista.
+        clinicService.taskRole.addToPrincipalPolicy(
+          new iam.PolicyStatement({
+            actions: ['iam:PassRole'],
+            resources: [messaging.schedulerExecutionRole.roleArn],
+          }),
+        );
+      }
 
       // Regla de seguridad: la task de este servicio es el UNICO origen
       // permitido hacia su propia RDS (plan maestro Fase 2, requisito de
