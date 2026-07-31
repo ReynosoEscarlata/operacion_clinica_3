@@ -1,6 +1,8 @@
 import {
   DOCTOR_ID_HEADER,
+  SUPPORT_GRANT_ID_HEADER,
   TENANT_ID_HEADER,
+  USER_ID_HEADER,
   USER_ROLE_HEADER,
   type AuthActor,
   type AuthenticatedRole,
@@ -28,11 +30,23 @@ export const registerAuthzContext = (app: FastifyInstance): void => {
     }
 
     const actor: AuthActor = {
+      sub: headerValue(request.headers[USER_ID_HEADER]) ?? '',
       role: role as AuthenticatedRole,
       tenantId: headerValue(request.headers[TENANT_ID_HEADER]),
       doctorId: headerValue(request.headers[DOCTOR_ID_HEADER]),
     };
     request.authActor = actor;
     authActorStorage.enterWith(actor);
+
+    // RFC-004, escalada de platform_support: trazabilidad mínima vía
+    // logging estructurado, ver el mismo comentario en
+    // services/auth/src/middleware/authz-context.ts.
+    const supportGrantId = headerValue(request.headers[SUPPORT_GRANT_ID_HEADER]);
+    if (supportGrantId) {
+      request.log.info(
+        { supportGrantId, actorRole: actor.role, tenantId: actor.tenantId },
+        'Acceso de soporte de plataforma',
+      );
+    }
   });
 };

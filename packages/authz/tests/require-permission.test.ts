@@ -73,7 +73,7 @@ describe('requirePermission: enforcement en runtime', () => {
 
   it('responde 403 con un rol sin el permiso', async () => {
     const app = buildApp();
-    const actor: AuthActor = { role: 'doctor', tenantId: 'tenant-a', doctorId: 'doctor-a' };
+    const actor: AuthActor = { sub: 'user-1', role: 'doctor', tenantId: 'tenant-a', doctorId: 'doctor-a' };
     const response = await app.inject({
       method: 'GET',
       url: '/v1/audit',
@@ -84,7 +84,7 @@ describe('requirePermission: enforcement en runtime', () => {
 
   it('responde 200 con un rol que tiene el permiso', async () => {
     const app = buildApp();
-    const actor: AuthActor = { role: 'platform_admin', tenantId: null, doctorId: null };
+    const actor: AuthActor = { sub: 'user-1', role: 'platform_admin', tenantId: null, doctorId: null };
     const response = await app.inject({
       method: 'GET',
       url: '/v1/audit',
@@ -123,7 +123,7 @@ describe('requirePermission: allowAnonymous (RFC-004, paciente sin cuenta)', () 
 
   it('con un doctor autenticado (permiso "none" en la matriz) sigue rechazando', async () => {
     const app = buildApp();
-    const actor: AuthActor = { role: 'doctor', tenantId: 'tenant-a', doctorId: 'doctor-a' };
+    const actor: AuthActor = { sub: 'user-1', role: 'doctor', tenantId: 'tenant-a', doctorId: 'doctor-a' };
     const response = await app.inject({
       method: 'GET',
       url: '/v1/appointments-like',
@@ -134,7 +134,7 @@ describe('requirePermission: allowAnonymous (RFC-004, paciente sin cuenta)', () 
 
   it('con receptionist autenticado (permiso "all" en la matriz) pasa', async () => {
     const app = buildApp();
-    const actor: AuthActor = { role: 'receptionist', tenantId: 'tenant-a', doctorId: null };
+    const actor: AuthActor = { sub: 'user-1', role: 'receptionist', tenantId: 'tenant-a', doctorId: null };
     const response = await app.inject({
       method: 'GET',
       url: '/v1/appointments-like',

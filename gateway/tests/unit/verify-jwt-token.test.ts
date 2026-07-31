@@ -45,7 +45,7 @@ afterAll(() => {
 
 const signToken = async (
   role: string,
-  claims: { tenant_id?: string | null; doctor_id?: string | null } = {},
+  claims: { tenant_id?: string | null; doctor_id?: string | null; support_grant_id?: string | null } = {},
 ): Promise<string> =>
   new SignJWT({ role, ...claims })
     .setProtectedHeader({ alg: 'RS256', kid })
@@ -81,7 +81,13 @@ describe('verifyJwt — token best-effort en rutas públicas', () => {
 
     await verifyJwt(request, reply);
 
-    expect(request.user).toEqual({ sub: 'user-1', role: 'clinic_owner', tenantId: null, doctorId: null });
+    expect(request.user).toEqual({
+      sub: 'user-1',
+      role: 'clinic_owner',
+      tenantId: null,
+      doctorId: null,
+      supportGrantId: null,
+    });
     expect(sendMock).not.toHaveBeenCalled();
   });
 
@@ -102,6 +108,29 @@ describe('verifyJwt — token best-effort en rutas públicas', () => {
       role: 'doctor',
       tenantId: '11111111-1111-1111-1111-111111111111',
       doctorId: '22222222-2222-2222-2222-222222222222',
+      supportGrantId: null,
+    });
+    expect(sendMock).not.toHaveBeenCalled();
+  });
+
+  it('un token de elevación propaga support_grant_id en request.user (RFC-004, escalada de platform_support)', async () => {
+    const { verifyJwt } = await import('../../src/middleware/verify-jwt.js');
+    const token = await signToken('platform_support', {
+      tenant_id: '11111111-1111-1111-1111-111111111111',
+      support_grant_id: '33333333-3333-3333-3333-333333333333',
+    });
+    const { request, reply, sendMock } = buildFakeRequestReply({
+      headers: { authorization: `Bearer ${token}` },
+    });
+
+    await verifyJwt(request, reply);
+
+    expect(request.user).toEqual({
+      sub: 'user-1',
+      role: 'platform_support',
+      tenantId: '11111111-1111-1111-1111-111111111111',
+      doctorId: null,
+      supportGrantId: '33333333-3333-3333-3333-333333333333',
     });
     expect(sendMock).not.toHaveBeenCalled();
   });

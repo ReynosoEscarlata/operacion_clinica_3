@@ -74,6 +74,26 @@ model RefreshToken {
   @@index([tenantId, userId])
 }
 
+// RFC-004-rbac.md, "Escalada de privilegios: acceso de soporte de
+// plataforma": un platform_support/platform_admin que necesita ver datos de
+// un tenant específico solicita un grant temporal con motivo obligatorio.
+// Append-only por convención de la app (users.repository.ts nunca expone
+// update/delete, y app_role no tiene esos privilegios -- ver migración
+// SQL): inmutabilidad REAL de motor (hash chain, S3 Object Lock) es Fase 5,
+// esto es deliberadamente el mínimo viable para Fase 4.
+model SupportAccessGrant {
+  id        String    @id @default(uuid()) @db.Uuid
+  actorId   String    @db.Uuid
+  tenantId  String    @db.Uuid
+  reason    String
+  expiresAt DateTime
+  createdAt DateTime  @default(now())
+  revokedAt DateTime?
+
+  @@index([actorId, tenantId])
+  @@index([expiresAt])
+}
+
 // Outbox (ADR-002-transacciones-distribuidas.md): UserCreated/UserDeactivated
 // se escriben aquí en la misma transacción que el cambio de User. tenantId
 // nullable, igual que User (un evento de un usuario de plataforma no tiene

@@ -5,14 +5,18 @@ import { tenantContextStorage } from '../lib/tenant-context.js';
 
 // Rutas exentas de requerir contexto de tenant: son justo las que EMITEN o
 // verifican identidad antes de que exista un tenant conocido (login/refresh/
-// JWKS). Todo lo demás en este servicio (gestión de usuarios) requiere un
-// tenant ya resuelto por el gateway. Distinto del patrón de "rutas públicas"
-// del gateway (ahí el criterio es paciente-sin-cuenta); aquí no hay
-// analogía de paciente — Auth no tiene rutas de paciente.
+// JWKS), o las que el actor de plataforma llama SIN tener un tenant propio
+// (support-access, RFC-004: el gateway nunca reenvía x-internal-tenant-id
+// para un actor con tenantId null -- ver gateway/src/routes/proxy.ts). Todo
+// lo demás en este servicio (gestión de usuarios) requiere un tenant ya
+// resuelto por el gateway. Distinto del patrón de "rutas públicas" del
+// gateway (ahí el criterio es paciente-sin-cuenta); aquí no hay analogía de
+// paciente — Auth no tiene rutas de paciente.
 const TENANT_EXEMPT_ROUTES: ReadonlyArray<{ method: string; pattern: RegExp }> = [
   { method: 'POST', pattern: /^\/v1\/auth\/login$/ },
   { method: 'POST', pattern: /^\/v1\/auth\/refresh$/ },
   { method: 'GET', pattern: /^\/v1\/auth\/\.well-known\/jwks\.json$/ },
+  { method: 'POST', pattern: /^\/v1\/auth\/support-access$/ },
 ];
 
 const isTenantExempt = (method: string, url: string): boolean => {

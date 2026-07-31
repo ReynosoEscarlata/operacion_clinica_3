@@ -8,6 +8,7 @@ import { ROLES } from '../src/roles.js';
 import type { AuthenticatedRole } from '../src/roles.js';
 
 const actorWith = (role: AuthenticatedRole): AuthActor => ({
+  sub: 'user-1',
   role,
   tenantId: role === 'platform_admin' || role === 'platform_support' ? null : 'tenant-a',
   doctorId: role === 'doctor' ? 'doctor-a' : null,

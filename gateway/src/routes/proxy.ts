@@ -1,6 +1,12 @@
 import type { IncomingHttpHeaders } from 'node:http';
 
-import { DOCTOR_ID_HEADER, TENANT_ID_HEADER, USER_ROLE_HEADER } from '@clinica/authz';
+import {
+  DOCTOR_ID_HEADER,
+  SUPPORT_GRANT_ID_HEADER,
+  TENANT_ID_HEADER,
+  USER_ID_HEADER,
+  USER_ROLE_HEADER,
+} from '@clinica/authz';
 import fastifyHttpProxy from '@fastify/http-proxy';
 import type { FastifyInstance } from 'fastify';
 
@@ -11,7 +17,13 @@ import { env } from '../config/env.js';
 // difiere entre HTTP/HTTP2 y no vale la pena replicar aquí), y permite
 // testear esta función con un objeto mínimo sin levantar el proxy completo.
 interface RequestWithUser {
-  user?: { role: string; tenantId: string | null; doctorId: string | null };
+  user?: {
+    sub: string;
+    role: string;
+    tenantId: string | null;
+    doctorId: string | null;
+    supportGrantId: string | null;
+  };
 }
 
 // Si la request llegó con un JWT válido (ej. un actor autenticado que
@@ -28,7 +40,7 @@ interface RequestWithUser {
 // la firma real se castea en el único call site (registerProxyRoutes).
 export const buildInternalHeaders = (request: RequestWithUser, headers: IncomingHttpHeaders): unknown => ({
   ...headers,
-  ...(request.user ? { [USER_ROLE_HEADER]: request.user.role } : {}),
+  ...(request.user ? { [USER_ROLE_HEADER]: request.user.role, [USER_ID_HEADER]: request.user.sub } : {}),
   // tenant_id nunca lo pone el cliente -- solo se reenvia si vino de un JWT
   // verificado con ese claim (RFC-003). Un usuario de plataforma (tenantId
   // null) no reenvia el header en absoluto, igual que un request sin JWT.
@@ -36,6 +48,11 @@ export const buildInternalHeaders = (request: RequestWithUser, headers: Incoming
   // doctor_id solo presente para role === 'doctor' (RFC-004, filtro ABAC de
   // propiedad en appointments/doctors).
   ...(request.user?.doctorId ? { [DOCTOR_ID_HEADER]: request.user.doctorId } : {}),
+  // Solo presente bajo un JWT de elevación emitido por
+  // POST /v1/auth/support-access (RFC-004, escalada de platform_support) --
+  // cada servicio lo usa únicamente para loguear el acceso, ver
+  // authz-context.ts de cada uno.
+  ...(request.user?.supportGrantId ? { [SUPPORT_GRANT_ID_HEADER]: request.user.supportGrantId } : {}),
 });
 
 /**

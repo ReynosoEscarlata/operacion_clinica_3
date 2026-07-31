@@ -23,7 +23,13 @@ const EXEMPT = new Set([
 // agregas una ruta nueva y no la agregas a esta lista (o a EXEMPT arriba),
 // este test falla -- evita que un endpoint se quede sin pensar su
 // aislamiento cross-tenant.
-const COVERED = new Set(['POST /v1/users', 'GET /v1/users', 'PATCH /v1/users/:id/deactivate']);
+const COVERED = new Set([
+  'POST /v1/users',
+  'GET /v1/users',
+  'PATCH /v1/users/:id/deactivate',
+  // RFC-004, escalada de platform_support -- ver tests/integration/support-access.test.ts.
+  'POST /v1/auth/support-access',
+]);
 
 // (?:<[^>]*>)? -- Fase 4: app.post<{ Body: X }>('/ruta', ...) es el patrón
 // que exige agregar `config` junto a `schema` sin romper la inferencia de

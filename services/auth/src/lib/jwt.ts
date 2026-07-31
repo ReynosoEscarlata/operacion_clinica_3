@@ -14,12 +14,21 @@ export interface AccessTokenClaims {
   // Solo relevante si role === 'doctor' (RFC-004, filtro ABAC de propiedad
   // "un doctor solo ve sus propias citas") -- null en cualquier otro rol.
   doctorId: string | null;
+  // Presente solo en un token de elevación emitido por
+  // POST /v1/auth/support-access (RFC-004, escalada de platform_support) --
+  // undefined en cualquier login/refresh normal.
+  supportGrantId?: string;
 }
 
 export const signAccessToken = async (claims: AccessTokenClaims): Promise<string> => {
   const { privateKey, kid } = await getSigningKeys();
 
-  return new SignJWT({ role: claims.role, tenant_id: claims.tenantId, doctor_id: claims.doctorId })
+  return new SignJWT({
+    role: claims.role,
+    tenant_id: claims.tenantId,
+    doctor_id: claims.doctorId,
+    ...(claims.supportGrantId ? { support_grant_id: claims.supportGrantId } : {}),
+  })
     .setProtectedHeader({ alg: 'RS256', kid })
     .setSubject(claims.sub)
     .setIssuedAt()

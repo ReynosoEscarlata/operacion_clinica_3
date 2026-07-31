@@ -4,6 +4,7 @@ export {
   DOCTOR_ID_HEADER,
   SUPPORT_GRANT_ID_HEADER,
   TENANT_ID_HEADER,
+  USER_ID_HEADER,
   USER_ROLE_HEADER,
 } from './headers.js';
 export type { PermissionGrant, PermissionMatrix } from './matrix.js';
