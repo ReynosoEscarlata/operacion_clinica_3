@@ -7,6 +7,10 @@ import { buildApp } from '../../src/app.js';
 import { prisma } from '../../src/config/prisma.js';
 import type { NotificationService } from '../../src/modules/notifications/notification.service.js';
 
+// role platform_admin (RFC-004): dead_letter:* es exclusivo del plano de
+// plataforma -- necesario ahora que estas rutas exigen requirePermission().
+const PLATFORM_HEADERS = { 'x-internal-user-role': 'platform_admin' };
+
 const buildFakeNotificationService = (): NotificationService =>
   ({
     handleAppointmentCreated: vi.fn().mockResolvedValue(undefined),
@@ -44,7 +48,7 @@ describe('API HTTP de dead-letter (Notifications, Postgres real)', () => {
     });
     createdIds.push(entry.id);
 
-    const response = await app.inject({ method: 'GET', url: '/v1/dead-letter' });
+    const response = await app.inject({ method: 'GET', url: '/v1/dead-letter', headers: PLATFORM_HEADERS });
 
     expect(response.statusCode).toBe(200);
     const body = response.json();
@@ -65,7 +69,11 @@ describe('API HTTP de dead-letter (Notifications, Postgres real)', () => {
       },
     });
 
-    const response = await app.inject({ method: 'POST', url: `/v1/dead-letter/${entry.id}/retry` });
+    const response = await app.inject({
+      method: 'POST',
+      url: `/v1/dead-letter/${entry.id}/retry`,
+      headers: PLATFORM_HEADERS,
+    });
 
     expect(response.statusCode).toBe(200);
     expect(notificationService.handleAppointmentStatusChanged).toHaveBeenCalledWith({
@@ -94,7 +102,11 @@ describe('API HTTP de dead-letter (Notifications, Postgres real)', () => {
     });
     createdIds.push(entry.id);
 
-    const response = await app.inject({ method: 'POST', url: `/v1/dead-letter/${entry.id}/retry` });
+    const response = await app.inject({
+      method: 'POST',
+      url: `/v1/dead-letter/${entry.id}/retry`,
+      headers: PLATFORM_HEADERS,
+    });
 
     expect(response.statusCode).toBe(500);
     const stillThere = await prisma.deadLetterEntry.findUnique({ where: { id: entry.id } });
@@ -102,7 +114,11 @@ describe('API HTTP de dead-letter (Notifications, Postgres real)', () => {
   });
 
   it('devuelve 404 al reintentar una entrada que no existe', async () => {
-    const response = await app.inject({ method: 'POST', url: `/v1/dead-letter/${randomUUID()}/retry` });
+    const response = await app.inject({
+      method: 'POST',
+      url: `/v1/dead-letter/${randomUUID()}/retry`,
+      headers: PLATFORM_HEADERS,
+    });
     expect(response.statusCode).toBe(404);
     expect(response.json().error.code).toBe('DEAD_LETTER_NOT_FOUND');
   });
@@ -112,7 +128,11 @@ describe('API HTTP de dead-letter (Notifications, Postgres real)', () => {
       data: { eventId: randomUUID(), eventType: 'PaymentFailed', payload: {}, error: 'boom', attempts: 5 },
     });
 
-    const response = await app.inject({ method: 'DELETE', url: `/v1/dead-letter/${entry.id}` });
+    const response = await app.inject({
+      method: 'DELETE',
+      url: `/v1/dead-letter/${entry.id}`,
+      headers: PLATFORM_HEADERS,
+    });
 
     expect(response.statusCode).toBe(200);
     expect(notificationService.handlePaymentFailed).not.toHaveBeenCalled();
@@ -121,7 +141,11 @@ describe('API HTTP de dead-letter (Notifications, Postgres real)', () => {
   });
 
   it('devuelve 404 al borrar una entrada que no existe', async () => {
-    const response = await app.inject({ method: 'DELETE', url: `/v1/dead-letter/${randomUUID()}` });
+    const response = await app.inject({
+      method: 'DELETE',
+      url: `/v1/dead-letter/${randomUUID()}`,
+      headers: PLATFORM_HEADERS,
+    });
     expect(response.statusCode).toBe(404);
   });
 });

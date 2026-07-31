@@ -6,7 +6,9 @@ on:
     paths:
       - 'services/auth/**'
       - 'packages/authz/**'
+      - 'packages/messaging/**'
       - 'packages/contracts/auth/**'
+      - 'scripts/localstack-setup.mjs'
       # Contract test (Pact, PLAN.md Fase 4): ver nota equivalente en
       # doctors-ci.yml.
       - 'pacts/gateway-auth.json'
@@ -17,7 +19,9 @@ on:
     paths:
       - 'services/auth/**'
       - 'packages/authz/**'
+      - 'packages/messaging/**'
       - 'packages/contracts/auth/**'
+      - 'scripts/localstack-setup.mjs'
       # Contract test (Pact, PLAN.md Fase 4): ver nota equivalente en
       # doctors-ci.yml.
       - 'pacts/gateway-auth.json'
@@ -43,13 +47,31 @@ jobs:
           --health-timeout 5s
           --health-retries 5
 
+      # Fase 3b (ADR-014): emula SNS -- reemplaza la env var REDIS_URL
+      # vestigial que tenía este workflow (Auth nunca usó Redis realmente).
+      localstack:
+        image: localstack/localstack:3
+        ports:
+          - 4566:4566
+        env:
+          SERVICES: sns,sqs,scheduler
+        options: >-
+          --health-cmd "curl -f http://localhost:4566/_localstack/health"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
     env:
       NODE_ENV: test
       PORT: 4001
       LOG_LEVEL: silent
       DATABASE_URL: postgresql://auth:auth@localhost:5432/auth_db?schema=public
       DATABASE_URL_APP: postgresql://app_role:app_role_dev_password@localhost:5432/auth_db?schema=public
-      REDIS_URL: redis://localhost:6379
+      AWS_REGION: us-east-1
+      AWS_ENDPOINT_URL: http://localhost:4566
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      DOMAIN_EVENTS_TOPIC_ARN: arn:aws:sns:us-east-1:000000000000:clinica-test-domain-events
 
     steps:
       - name: Checkout
@@ -60,14 +82,25 @@ jobs:
         with:
           node-version: '20'
 
-      # Workspace: @clinica/authz no esta publicado, npm no lo resuelve si
-      # se instala desde dentro de services/auth -- hay que instalar desde
-      # la raiz (ver build: convertir el repo en npm workspaces).
+      # Workspace: @clinica/authz y @clinica/messaging no están publicados,
+      # hay que instalar desde la raíz (ver build: convertir el repo en npm
+      # workspaces).
       - name: Install dependencies (workspace root)
-        run: npm install --workspace=services/auth --workspace=packages/authz --include-workspace-root
+        run: npm install --workspace=services/auth --workspace=packages/authz --workspace=packages/messaging --include-workspace-root
 
       - name: Build @clinica/authz
         run: npm run build --workspace=packages/authz
+
+      - name: Build @clinica/messaging
+        run: npm run build --workspace=packages/messaging
+
+      - name: Install scripts dependencies
+        working-directory: scripts
+        run: npm install
+
+      - name: Provision LocalStack (topic/colas/DLQs/schedule-group)
+        working-directory: scripts
+        run: npm run localstack:setup
 
       - name: Generate Prisma Client
         working-directory: services/auth
