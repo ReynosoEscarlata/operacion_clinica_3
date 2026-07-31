@@ -1,5 +1,8 @@
 import type { PrismaClient } from '@prisma/client';
 
+import { getTenantId } from '../../lib/tenant-context.js';
+import { withTenant } from '../../lib/tenant-scoped.js';
+
 export interface NotificationLogRepository {
   record: (
     appointmentId: string,
@@ -13,9 +16,15 @@ export interface NotificationLogRepository {
 
 export const buildNotificationLogRepository = (prisma: PrismaClient): NotificationLogRepository => ({
   record: async (appointmentId, channel, type, status, error) => {
-    await prisma.notificationLog.create({
-      data: { appointmentId, channel, type, status, error: error ?? null },
-    });
+    const tenantId = getTenantId();
+    if (!tenantId) {
+      throw new Error('record() llamado sin tenant en contexto');
+    }
+    await withTenant(prisma, (tx) =>
+      tx.notificationLog.create({
+        data: { tenantId, appointmentId, channel, type, status, error: error ?? null },
+      }),
+    );
   },
   // Idempotencia (PLAN.md Fase 3, punto 2: "mismo evento dos veces ≠ dos
   // correos"). SQS es at-least-once: el mismo evento puede entregarse de
@@ -25,10 +34,12 @@ export const buildNotificationLogRepository = (prisma: PrismaClient): Notificati
   // cita, porque la state machine de Appointments garantiza que cada
   // estado (PAID, CANCELLED, ...) se visita una sola vez.
   wasAlreadySent: async (appointmentId, type) => {
-    const existing = await prisma.notificationLog.findFirst({
-      where: { appointmentId, type, status: 'SENT' },
-      select: { id: true },
-    });
+    const existing = await withTenant(prisma, (tx) =>
+      tx.notificationLog.findFirst({
+        where: { appointmentId, type, status: 'SENT' },
+        select: { id: true },
+      }),
+    );
     return existing !== null;
   },
 });

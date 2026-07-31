@@ -15,21 +15,31 @@ datasource db {
 // eventos que consume (AppointmentCreated/StatusChanged, PatientUpdated,
 // DoctorCreated/Updated). Solo se guardan los campos que realmente se usan
 // para armar los emails, no una copia completa de cada entidad.
+// tenantId NOT NULL (Fase 3b, ADR-014): el envelope de eventos de dominio
+// trae tenantId de punta a punta desde que los 5 productores migraron a
+// SNS/SQS -- recién ahí fue posible cerrar la tenancy de este servicio sin
+// adivinar el contrato (ver docs/runbooks/migracion-tenant-id.md).
 model AppointmentSnapshot {
   id          String   @id @db.Uuid
+  tenantId    String   @db.Uuid
   patientId   String   @db.Uuid
   doctorId    String   @db.Uuid
   dateTime    DateTime
   amountCents Int      @default(0)
   status      String
   updatedAt   DateTime @updatedAt
+
+  @@index([tenantId])
 }
 
 model PatientSnapshot {
   id        String   @id @db.Uuid
+  tenantId  String   @db.Uuid
   email     String
   name      String
   updatedAt DateTime @updatedAt
+
+  @@index([tenantId])
 }
 
 // Todavía no se reciben eventos reales de Doctors (sigue siendo un
@@ -38,9 +48,12 @@ model PatientSnapshot {
 // fallback genérico en vez del nombre del doctor (ver notification.service.ts).
 model DoctorSnapshot {
   id        String   @id @db.Uuid
+  tenantId  String   @db.Uuid
   name      String
   specialty String
   updatedAt DateTime @updatedAt
+
+  @@index([tenantId])
 }
 
 // Auditoría de envíos (éxito y fallo) — equivalente al AppointmentEvent
@@ -48,6 +61,7 @@ model DoctorSnapshot {
 // Notifications (cero estado compartido).
 model NotificationLog {
   id            String   @id @default(uuid()) @db.Uuid
+  tenantId      String   @db.Uuid
   appointmentId String   @db.Uuid
   channel       String
   type          String
@@ -55,15 +69,16 @@ model NotificationLog {
   error         String?
   createdAt     DateTime @default(now())
 
-  @@index([appointmentId])
+  @@index([tenantId, appointmentId])
 }
 
 // Dead-letter para eventos de dominio que fallaron de forma permanente al
 // procesarse (ej. error de Resend agotando reintentos). Resuelve el gap
 // documentado en SPEC.md: sin esto, un evento "venenoso" se queda
-// reintentando para siempre en la Pending Entries List de Redis Streams.
+// reintentando para siempre en la cola.
 model DeadLetterEntry {
   id          String   @id @default(uuid()) @db.Uuid
+  tenantId    String   @db.Uuid
   eventId     String
   eventType   String
   payload     Json
@@ -71,5 +86,5 @@ model DeadLetterEntry {
   attempts    Int      @default(1)
   failedAt    DateTime @default(now())
 
-  @@index([eventType])
+  @@index([tenantId, eventType])
 }

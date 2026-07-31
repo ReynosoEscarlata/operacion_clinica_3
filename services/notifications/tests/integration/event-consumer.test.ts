@@ -8,16 +8,19 @@ import type { NotificationChannel } from '../../src/clients/notification-channel
 import { buildAwsConfig } from '../../src/config/aws.js';
 import { env } from '../../src/config/env.js';
 import { prisma } from '../../src/config/prisma.js';
-import type { EventHandler } from '../../src/lib/handler-types.js';
+import { buildEventHandlers } from '../../src/lib/event-handlers.js';
 import { logger } from '../../src/lib/logger.js';
+import { withTenantId } from '../../src/lib/tenant-scoped.js';
 import { buildNotificationLogRepository } from '../../src/modules/notifications/notification-log.repository.js';
 import { buildNotificationService } from '../../src/modules/notifications/notification.service.js';
 import { buildSnapshotsRepository } from '../../src/modules/notifications/snapshots.repository.js';
 
+const TEST_TENANT_ID = '88888888-8888-8888-8888-888888888880';
+
 // Publica directo a la cola SQS de Notifications, como si SNS ya hubiera
 // hecho el fan-out (rawMessageDelivery) -- simula "lo que llega", no un
-// test end-to-end del publisher (mismo patrón que ya usaban los tests
-// equivalentes de Appointments contra Redis Streams).
+// test end-to-end del publisher (ese ya se prueba en outbox-relay.test.ts
+// de cada servicio productor).
 const sqsClient = buildSqsClient(buildAwsConfig());
 
 const publishToQueue = async (type: string, payload: Record<string, unknown>): Promise<void> => {
@@ -26,7 +29,7 @@ const publishToQueue = async (type: string, payload: Record<string, unknown>): P
       QueueUrl: env.NOTIFICATIONS_DOMAIN_EVENTS_QUEUE_URL,
       MessageBody: JSON.stringify({
         eventId: randomUUID(),
-        tenantId: randomUUID(),
+        tenantId: TEST_TENANT_ID,
         type,
         payload,
         publishedAt: new Date().toISOString(),
@@ -43,13 +46,7 @@ describe('Consumer de eventos de dominio (Notifications, Postgres + SQS reales v
     logs: buildNotificationLogRepository(prisma),
     logger,
   });
-
-  const handlers: Record<string, EventHandler> = {
-    AppointmentCreated: (event) => notificationService.handleAppointmentCreated(event.payload as never),
-    AppointmentStatusChanged: (event) =>
-      notificationService.handleAppointmentStatusChanged(event.payload as never),
-    PatientUpdated: (event) => notificationService.handlePatientUpdated(event.payload as never),
-  };
+  const handlers = buildEventHandlers(notificationService);
 
   afterAll(async () => {
     await prisma.$disconnect();
@@ -82,17 +79,23 @@ describe('Consumer de eventos de dominio (Notifications, Postgres + SQS reales v
 
     expect(processed).toBeGreaterThanOrEqual(3);
 
-    const snapshot = await prisma.appointmentSnapshot.findUnique({ where: { id: appointmentId } });
+    const snapshot = await withTenantId(prisma, TEST_TENANT_ID, (tx) =>
+      tx.appointmentSnapshot.findUnique({ where: { id: appointmentId } }),
+    );
     expect(snapshot?.status).toBe('PAID');
 
-    const patientSnapshot = await prisma.patientSnapshot.findUnique({ where: { id: patientId } });
+    const patientSnapshot = await withTenantId(prisma, TEST_TENANT_ID, (tx) =>
+      tx.patientSnapshot.findUnique({ where: { id: patientId } }),
+    );
     expect(patientSnapshot?.email).toBe('consumer-test@example.com');
 
     expect(fakeChannel.send).toHaveBeenCalledWith(
       expect.objectContaining({ to: 'consumer-test@example.com', subject: expect.stringContaining('confirmada') }),
     );
 
-    const log = await prisma.notificationLog.findFirst({ where: { appointmentId } });
+    const log = await withTenantId(prisma, TEST_TENANT_ID, (tx) =>
+      tx.notificationLog.findFirst({ where: { appointmentId } }),
+    );
     expect(log?.status).toBe('SENT');
   });
 
@@ -130,7 +133,9 @@ describe('Consumer de eventos de dominio (Notifications, Postgres + SQS reales v
     const sendCallsAfter = (fakeChannel.send as ReturnType<typeof vi.fn>).mock.calls.length;
     expect(sendCallsAfter - sendCallsBefore).toBe(1);
 
-    const logs = await prisma.notificationLog.findMany({ where: { appointmentId } });
+    const logs = await withTenantId(prisma, TEST_TENANT_ID, (tx) =>
+      tx.notificationLog.findMany({ where: { appointmentId } }),
+    );
     expect(logs).toHaveLength(1);
     expect(logs[0]?.status).toBe('SENT');
   });

@@ -8,6 +8,7 @@ import { errorHandler } from './middleware/error-handler.js';
 import { registerAuthzContext } from './middleware/authz-context.js';
 import { registerMetricsMiddleware } from './middleware/metrics.js';
 import { registerRequestId } from './middleware/request-id.js';
+import { registerTenantContext } from './middleware/tenant-context.js';
 import {
   registerNotificationsRoutes,
   type NotificationsRoutesDeps,
@@ -27,6 +28,7 @@ export const buildApp = async (deps: BuildAppDeps = {}): Promise<FastifyInstance
 
   await app.register(cors);
   registerRequestId(app);
+  registerTenantContext(app);
   registerAuthzContext(app);
   registerAuthzEnforcement(app);
   registerMetricsMiddleware(app);

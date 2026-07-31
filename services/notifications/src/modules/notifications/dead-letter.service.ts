@@ -1,7 +1,7 @@
+import type { EventHandler } from '@clinica/messaging';
 import type { DeadLetterEntry } from '@prisma/client';
 
 import { AppError } from '../../lib/app-error.js';
-import type { EventHandler } from '../../lib/handler-types.js';
 import type { DeadLetterRepository } from './dead-letter.repository.js';
 
 export class DeadLetterService {
@@ -34,7 +34,13 @@ export class DeadLetterService {
       );
     }
 
-    await handler({ eventId: entry.eventId, type: entry.eventType, payload: entry.payload as Record<string, unknown> });
+    await handler({
+      eventId: entry.eventId,
+      tenantId: entry.tenantId,
+      type: entry.eventType,
+      payload: entry.payload as Record<string, unknown>,
+      publishedAt: entry.failedAt.toISOString(),
+    });
     await this.repository.remove(id);
   }
 

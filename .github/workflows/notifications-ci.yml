@@ -60,6 +60,7 @@ jobs:
       PORT: 4005
       LOG_LEVEL: silent
       DATABASE_URL: postgresql://notifications:notifications@localhost:5432/notifications_db?schema=public
+      DATABASE_URL_APP: postgresql://app_role:app_role_dev_password@localhost:5432/notifications_db?schema=public
       RESEND_API_KEY: re_dummy
       RESEND_FROM_EMAIL: no-reply@clinica.example.com
       AWS_REGION: us-east-1

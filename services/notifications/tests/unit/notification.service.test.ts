@@ -7,8 +7,11 @@ import { buildNotificationService } from '../../src/modules/notifications/notifi
 import type { NotificationLogRepository } from '../../src/modules/notifications/notification-log.repository.js';
 import type { SnapshotsRepository } from '../../src/modules/notifications/snapshots.repository.js';
 
+const TENANT_ID = '11111111-1111-1111-1111-111111111111';
+
 const buildAppointment = (overrides: Partial<AppointmentSnapshot> = {}): AppointmentSnapshot => ({
   id: 'apt-1',
+  tenantId: TENANT_ID,
   patientId: 'patient-1',
   doctorId: 'doctor-1',
   dateTime: new Date(),
@@ -20,6 +23,7 @@ const buildAppointment = (overrides: Partial<AppointmentSnapshot> = {}): Appoint
 
 const buildPatient = (overrides: Partial<PatientSnapshot> = {}): PatientSnapshot => ({
   id: 'patient-1',
+  tenantId: TENANT_ID,
   email: 'patient@example.com',
   name: 'Paciente Test',
   updatedAt: new Date(),

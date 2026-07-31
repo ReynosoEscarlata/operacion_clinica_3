@@ -272,6 +272,7 @@ services:
       NODE_ENV: development
       PORT: 4005
       DATABASE_URL: postgresql://notifications:notifications@postgres-notifications:5432/notifications_db?schema=public
+      DATABASE_URL_APP: postgresql://app_role:app_role_dev_password@postgres-notifications:5432/notifications_db?schema=public
       RESEND_API_KEY: ${RESEND_API_KEY:-re_dummy}
       RESEND_FROM_EMAIL: ${RESEND_FROM_EMAIL:-no-reply@clinica.example.com}
       AWS_REGION: us-east-1

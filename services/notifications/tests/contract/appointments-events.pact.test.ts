@@ -12,9 +12,11 @@ import { buildNotificationService } from '../../src/modules/notifications/notifi
 import { buildSnapshotsRepository } from '../../src/modules/notifications/snapshots.repository.js';
 import { prisma } from '../../src/config/prisma.js';
 import { logger } from '../../src/lib/logger.js';
+import { withTenantId } from '../../src/lib/tenant-scoped.js';
 
 const { like, datetime } = MatchersV3;
 const ISO_DATETIME_FORMAT = "yyyy-MM-dd'T'HH:mm:ss.SSSX";
+const TEST_TENANT_ID = '77777777-7777-7777-7777-777777777770';
 
 // Pact de mensajes (PLAN.md Fase 4, punto 3b: "incluyendo el esquema del
 // evento"). A diferencia de los contratos HTTP de arriba, esto no tiene
@@ -60,13 +62,17 @@ describe('Pact de mensajes: Appointments (provider) → Notifications (consumer)
         asynchronousBodyHandler(async (body) => {
           await handlers.AppointmentCreated?.({
             eventId: randomUUID(),
+            tenantId: TEST_TENANT_ID,
             type: 'AppointmentCreated',
             payload: body as Record<string, unknown>,
+            publishedAt: new Date().toISOString(),
           });
         }),
       );
 
-    await prisma.appointmentSnapshot.delete({ where: { id: appointmentId } }).catch(() => undefined);
+    await withTenantId(prisma, TEST_TENANT_ID, (tx) => tx.appointmentSnapshot.delete({ where: { id: appointmentId } })).catch(
+      () => undefined,
+    );
   });
 
   it('AppointmentStatusChanged a PAID: Notifications puede procesar el evento (requiere el snapshot previo)', async () => {
@@ -86,21 +92,26 @@ describe('Pact de mensajes: Appointments (provider) → Notifications (consumer)
     // cita ya exista (lo crea AppointmentCreated) — se siembra acá porque
     // este test verifica el handler de status-changed en aislamiento, no
     // la secuencia completa de eventos.
-    await prisma.appointmentSnapshot.create({
-      data: {
-        id: appointmentId,
-        patientId,
-        doctorId: randomUUID(),
-        dateTime: new Date(Date.now() + 86_400_000),
-        amountCents: 50_000,
-        status: 'CONFIRMED',
-      },
-    });
-    await prisma.patientSnapshot.upsert({
-      where: { id: patientId },
-      create: { id: patientId, email: `pact-${appointmentId}@example.com`, name: 'Paciente Pact' },
-      update: {},
-    });
+    await withTenantId(prisma, TEST_TENANT_ID, (tx) =>
+      tx.appointmentSnapshot.create({
+        data: {
+          id: appointmentId,
+          tenantId: TEST_TENANT_ID,
+          patientId,
+          doctorId: randomUUID(),
+          dateTime: new Date(Date.now() + 86_400_000),
+          amountCents: 50_000,
+          status: 'CONFIRMED',
+        },
+      }),
+    );
+    await withTenantId(prisma, TEST_TENANT_ID, (tx) =>
+      tx.patientSnapshot.upsert({
+        where: { id: patientId },
+        create: { id: patientId, tenantId: TEST_TENANT_ID, email: `pact-${appointmentId}@example.com`, name: 'Paciente Pact' },
+        update: {},
+      }),
+    );
 
     await messagePact
       .given('una cita pasa a PAID')
@@ -115,13 +126,19 @@ describe('Pact de mensajes: Appointments (provider) → Notifications (consumer)
         asynchronousBodyHandler(async (body) => {
           await handlers.AppointmentStatusChanged?.({
             eventId: randomUUID(),
+            tenantId: TEST_TENANT_ID,
             type: 'AppointmentStatusChanged',
             payload: body as Record<string, unknown>,
+            publishedAt: new Date().toISOString(),
           });
         }),
       );
 
-    await prisma.appointmentSnapshot.delete({ where: { id: appointmentId } }).catch(() => undefined);
-    await prisma.patientSnapshot.delete({ where: { id: patientId } }).catch(() => undefined);
+    await withTenantId(prisma, TEST_TENANT_ID, (tx) => tx.appointmentSnapshot.delete({ where: { id: appointmentId } })).catch(
+      () => undefined,
+    );
+    await withTenantId(prisma, TEST_TENANT_ID, (tx) => tx.patientSnapshot.delete({ where: { id: patientId } })).catch(
+      () => undefined,
+    );
   });
 });

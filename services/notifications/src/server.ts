@@ -30,7 +30,20 @@ const start = async (): Promise<void> => {
 
   const deadLetterRepository = buildDeadLetterRepository(prisma);
   const onDeadLetter: DeadLetterHandler = async (event, error, attempts) => {
+    // event.tenantId puede ser null solo si el envelope ni siquiera pudo
+    // parsearse (ver bestEffortEvent en @clinica/messaging) --
+    // DeadLetterEntry.tenantId es NOT NULL (Fase 3b), así que ese caso se
+    // loguea como error crítico en vez de perder silenciosamente el registro.
+    if (!event.tenantId) {
+      logger.error(
+        { event, error: error instanceof Error ? error.message : String(error) },
+        'Evento de dominio sin tenantId a dead-letter -- registro perdido',
+      );
+      return;
+    }
+
     await deadLetterRepository.record(
+      event.tenantId,
       event.eventId,
       event.type,
       event.payload,

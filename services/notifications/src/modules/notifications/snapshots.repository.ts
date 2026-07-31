@@ -1,5 +1,8 @@
 import type { AppointmentSnapshot, DoctorSnapshot, PatientSnapshot, PrismaClient } from '@prisma/client';
 
+import { getTenantId } from '../../lib/tenant-context.js';
+import { withTenant } from '../../lib/tenant-scoped.js';
+
 export interface UpsertAppointmentData {
   id: string;
   patientId: string;
@@ -31,20 +34,31 @@ export interface SnapshotsRepository {
   getDoctor: (id: string) => Promise<DoctorSnapshot | null>;
 }
 
+const requireTenantId = (operation: string): string => {
+  const tenantId = getTenantId();
+  if (!tenantId) {
+    throw new Error(`${operation}() llamado sin tenant en contexto`);
+  }
+  return tenantId;
+};
+
 export class PrismaSnapshotsRepository implements SnapshotsRepository {
   constructor(private readonly prisma: PrismaClient) {}
 
   async upsertAppointment(data: UpsertAppointmentData): Promise<AppointmentSnapshot> {
-    return this.prisma.appointmentSnapshot.upsert({
-      where: { id: data.id },
-      create: data,
-      update: data,
-    });
+    const tenantId = requireTenantId('upsertAppointment');
+    return withTenant(this.prisma, (tx) =>
+      tx.appointmentSnapshot.upsert({
+        where: { id: data.id },
+        create: { ...data, tenantId },
+        update: data,
+      }),
+    );
   }
 
   async updateAppointmentStatus(id: string, status: string): Promise<AppointmentSnapshot | null> {
     try {
-      return await this.prisma.appointmentSnapshot.update({ where: { id }, data: { status } });
+      return await withTenant(this.prisma, (tx) => tx.appointmentSnapshot.update({ where: { id }, data: { status } }));
     } catch {
       // P2025: no existe el snapshot todavía (AppointmentCreated no se
       // procesó aún, posible reordenamiento) — el caller decide qué hacer
@@ -54,23 +68,33 @@ export class PrismaSnapshotsRepository implements SnapshotsRepository {
   }
 
   async getAppointment(id: string): Promise<AppointmentSnapshot | null> {
-    return this.prisma.appointmentSnapshot.findUnique({ where: { id } });
+    return withTenant(this.prisma, (tx) => tx.appointmentSnapshot.findUnique({ where: { id } }));
   }
 
   async upsertPatient(data: UpsertPatientData): Promise<PatientSnapshot> {
-    return this.prisma.patientSnapshot.upsert({ where: { id: data.id }, create: data, update: data });
+    const tenantId = requireTenantId('upsertPatient');
+    return withTenant(this.prisma, (tx) =>
+      tx.patientSnapshot.upsert({ where: { id: data.id }, create: { ...data, tenantId }, update: data }),
+    );
   }
 
   async getPatient(id: string): Promise<PatientSnapshot | null> {
-    return this.prisma.patientSnapshot.findUnique({ where: { id } });
+    return withTenant(this.prisma, (tx) => tx.patientSnapshot.findUnique({ where: { id } }));
   }
 
   async upsertDoctor(data: UpsertDoctorData): Promise<DoctorSnapshot> {
-    return this.prisma.doctorSnapshot.upsert({ where: { id: data.id }, create: data, update: data });
+    const tenantId = requireTenantId('upsertDoctor');
+    return withTenant(this.prisma, (tx) =>
+      tx.doctorSnapshot.upsert({
+        where: { id: data.id },
+        create: { ...data, tenantId },
+        update: data,
+      }),
+    );
   }
 
   async getDoctor(id: string): Promise<DoctorSnapshot | null> {
-    return this.prisma.doctorSnapshot.findUnique({ where: { id } });
+    return withTenant(this.prisma, (tx) => tx.doctorSnapshot.findUnique({ where: { id } }));
   }
 }
 

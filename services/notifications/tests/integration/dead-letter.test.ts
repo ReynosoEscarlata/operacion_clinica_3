@@ -1,12 +1,11 @@
 import { randomUUID } from 'node:crypto';
 
 import { CreateQueueCommand, DeleteQueueCommand, SendMessageCommand } from '@aws-sdk/client-sqs';
-import { buildSqsClient, pollQueueOnce, type DeadLetterHandler } from '@clinica/messaging';
+import { buildSqsClient, pollQueueOnce, type DeadLetterHandler, type EventHandler } from '@clinica/messaging';
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { buildAwsConfig } from '../../src/config/aws.js';
 import { prisma } from '../../src/config/prisma.js';
-import type { EventHandler } from '../../src/lib/handler-types.js';
 import { logger } from '../../src/lib/logger.js';
 
 const sqsClient = buildSqsClient(buildAwsConfig());
