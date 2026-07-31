@@ -2,6 +2,7 @@ import type { Prisma, PrismaClient } from '@prisma/client';
 import type Stripe from 'stripe';
 
 import type { Logger } from '../../lib/logger.js';
+import { writeAuditLog } from '../../lib/audit-log.js';
 import { writeOutboxEvent } from '../../lib/outbox.js';
 import { runWithTenant } from '../../lib/tenant-context.js';
 import { withTenantId } from '../../lib/tenant-scoped.js';
@@ -113,6 +114,7 @@ export class WebhookService {
       paymentIntentId: paymentIntent.id,
       amountCents: paymentIntent.amount,
     });
+    await writeAuditLog(tx, 'payment.webhook_processed', 'payment', paymentIntent.id, 'success');
   }
 
   private async handlePaymentFailed(
@@ -141,6 +143,7 @@ export class WebhookService {
       paymentIntentId: paymentIntent.id,
       reason: paymentIntent.last_payment_error?.message ?? null,
     });
+    await writeAuditLog(tx, 'payment.webhook_processed', 'payment', paymentIntent.id, 'failure');
   }
 }
 

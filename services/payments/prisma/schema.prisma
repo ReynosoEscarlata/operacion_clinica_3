@@ -34,6 +34,31 @@ model WebhookEvent {
   @@index([tenantId])
 }
 
+// Audit log inmutable (Fase 5, ADR-013): append-only por privilegio de
+// motor (app_role solo tiene SELECT/INSERT, ver migración SQL). Sin
+// hash-chaining (decisión consciente de ADR-013). tenantId NOT NULL: solo
+// se escribe cuando el handler ya resolvió el tenant desde el metadata del
+// PaymentIntent (mismo criterio que OutboxEvent en este servicio -- si no
+// hay tenant, tampoco hay outbox ni audit log, solo un log de advertencia).
+model AuditLog {
+  id            String   @id @default(uuid()) @db.Uuid
+  createdAt     DateTime @default(now())
+  tenantId      String   @db.Uuid
+  actorId       String?
+  actorRole     String?
+  action        String
+  resourceType  String
+  resourceId    String?
+  ip            String?
+  userAgent     String?
+  correlationId String?
+  result        String
+  justification String?
+
+  @@index([tenantId, createdAt])
+  @@index([resourceType, resourceId])
+}
+
 // Outbox (ADR-002): PaymentSucceeded/PaymentFailed/RefundIssued se escriben
 // aquí al procesar el webhook, en la misma transacción que marcar el
 // WebhookEvent como procesado. El relay a Redis Streams (Fase 3) los
