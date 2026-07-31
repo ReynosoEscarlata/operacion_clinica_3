@@ -52,11 +52,12 @@ Fuente: inventario de `docs/baseline-challenge-4.md`.
    paciente del reembolso) — cualquiera de los dos casos es una brecha que hay que resolver, no
    dejar ambigua.
 
-8. **Correlación de requestId rota entre servicios (Supuesto S6, parcial)** — **RESUELTO en Fase 6
-   (ADR-017)**: `gateway/src/middleware/request-id.ts` ahora genera/reenvía `x-request-id` (antes
-   el gateway no lo hacía en absoluto), y `DoctorsClient`/`PaymentsClient` lo propagan en sus
-   llamadas síncronas (antes no mandaban ese header). Seguir una request de punta a punta en los
-   logs de más de un servicio ya es confiable — ver `docs/runbooks/consultas-logs-insights.md`.
+8. **Correlación de requestId rota entre servicios (Supuesto S6, parcial)** — el gateway no
+   reenvía `x-request-id` explícitamente en el proxy, y las llamadas internas
+   (`DoctorsClient`/`PaymentsClient`) no lo propagan. Hoy, seguir una request de punta a punta en
+   los logs de más de un servicio no es confiable. Justificación: bloquea observabilidad real
+   (Fase 6) y hace mucho más difícil diagnosticar incidentes de aislamiento cross-tenant en
+   producción — es exactamente el tipo de gap que se nota a las 3am, no en desarrollo.
 
 9. **Llave de firma JWT de Auth vive en memoria del proceso** (documentado en el propio
    `services/auth/src/lib/keys.ts`) — un reinicio del servicio rota el `kid` e invalida todos los
