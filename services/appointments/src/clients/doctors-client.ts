@@ -1,4 +1,6 @@
 import { AppError } from '../lib/app-error.js';
+import { REQUEST_ID_HEADER } from '../lib/constants.js';
+import { getRequestId } from '../lib/request-context.js';
 
 export interface DoctorBasic {
   id: string;
@@ -21,9 +23,19 @@ const DOCTORS_UNAVAILABLE = (): never => {
   throw new AppError(502, 'DOCTORS_UNAVAILABLE', 'Servicio de doctores no disponible');
 };
 
+// Propaga requestId al servicio downstream (Fase 6, ADR-017) -- sin esto,
+// una llamada síncrona servicio-a-servicio pierde la correlación exacta
+// con la request que la originó.
+const correlationHeaders = (): Record<string, string> => {
+  const requestId = getRequestId();
+  return requestId ? { [REQUEST_ID_HEADER]: requestId } : {};
+};
+
 export const buildHttpDoctorsClient = (baseUrl: string): DoctorsClient => ({
   getDoctor: async (doctorId) => {
-    const response = await fetch(`${baseUrl}/v1/doctors/${doctorId}`).catch(DOCTORS_UNAVAILABLE);
+    const response = await fetch(`${baseUrl}/v1/doctors/${doctorId}`, { headers: correlationHeaders() }).catch(
+      DOCTORS_UNAVAILABLE,
+    );
     if (response.status === 404) {
       return null;
     }
@@ -36,7 +48,7 @@ export const buildHttpDoctorsClient = (baseUrl: string): DoctorsClient => ({
 
   getAvailableSlots: async (doctorId, date) => {
     const url = `${baseUrl}/v1/doctors/${doctorId}/slots?date=${encodeURIComponent(date)}`;
-    const response = await fetch(url).catch(DOCTORS_UNAVAILABLE);
+    const response = await fetch(url, { headers: correlationHeaders() }).catch(DOCTORS_UNAVAILABLE);
     if (!response.ok) {
       return DOCTORS_UNAVAILABLE();
     }

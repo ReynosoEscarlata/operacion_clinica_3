@@ -2,6 +2,7 @@ import { createRemoteJWKSet, jwtVerify } from 'jose';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 
 import { env } from '../config/env.js';
+import { setTenantId } from '../lib/request-context.js';
 
 // JWKS remoto cacheado por `jose` (no se consulta a Auth en cada request,
 // ver RFC-001-bounded-contexts.md decisión 2: JWT stateless con llave
@@ -85,13 +86,15 @@ export const verifyJwt = async (request: FastifyRequest, reply: FastifyReply): P
     const tenantClaim = payload['tenant_id'];
     const doctorClaim = payload['doctor_id'];
     const supportGrantClaim = payload['support_grant_id'];
+    const tenantId = typeof tenantClaim === 'string' ? tenantClaim : null;
     request.user = {
       sub: String(payload.sub),
       role: String(payload['role']),
-      tenantId: typeof tenantClaim === 'string' ? tenantClaim : null,
+      tenantId,
       doctorId: typeof doctorClaim === 'string' ? doctorClaim : null,
       supportGrantId: typeof supportGrantClaim === 'string' ? supportGrantClaim : null,
     };
+    setTenantId(tenantId);
   } catch (error) {
     request.log.warn({ err: error }, 'JWT inválido o expirado');
     if (!isPublic) {

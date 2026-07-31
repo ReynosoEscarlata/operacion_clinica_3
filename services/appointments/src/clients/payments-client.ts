@@ -1,5 +1,6 @@
 import { AppError } from '../lib/app-error.js';
-import { TENANT_ID_HEADER } from '../lib/constants.js';
+import { REQUEST_ID_HEADER, TENANT_ID_HEADER } from '../lib/constants.js';
+import { getRequestId } from '../lib/request-context.js';
 import { getTenantId } from '../lib/tenant-context.js';
 
 export interface PaymentIntentResult {
@@ -31,11 +32,19 @@ const PAYMENTS_UNAVAILABLE = (): never => {
   throw new AppError(502, 'PAYMENTS_UNAVAILABLE', 'Servicio de pago no disponible');
 };
 
+// Propaga requestId al servicio downstream (Fase 6, ADR-017) -- sin esto,
+// una llamada síncrona servicio-a-servicio pierde la correlación exacta
+// con la request que la originó.
+const correlationHeaders = (): Record<string, string> => {
+  const requestId = getRequestId();
+  return requestId ? { [REQUEST_ID_HEADER]: requestId } : {};
+};
+
 export const buildHttpPaymentsClient = (baseUrl: string): PaymentsClient => ({
   createCustomer: async (email, name) => {
     const response = await fetch(`${baseUrl}/v1/customers`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', ...correlationHeaders() },
       body: JSON.stringify({ email, name }),
     }).catch(PAYMENTS_UNAVAILABLE);
     if (!response.ok) {
@@ -56,6 +65,7 @@ export const buildHttpPaymentsClient = (baseUrl: string): PaymentsClient => ({
       headers: {
         'content-type': 'application/json',
         ...(tenantId ? { [TENANT_ID_HEADER]: tenantId } : {}),
+        ...correlationHeaders(),
       },
       body: JSON.stringify({
         appointmentId,
@@ -73,6 +83,7 @@ export const buildHttpPaymentsClient = (baseUrl: string): PaymentsClient => ({
   cancelPaymentIntent: async (paymentIntentId) => {
     const response = await fetch(`${baseUrl}/v1/payment-intents/${paymentIntentId}/cancel`, {
       method: 'POST',
+      headers: correlationHeaders(),
     }).catch(PAYMENTS_UNAVAILABLE);
     if (!response.ok) {
       PAYMENTS_UNAVAILABLE();
@@ -82,7 +93,7 @@ export const buildHttpPaymentsClient = (baseUrl: string): PaymentsClient => ({
   createRefund: async (paymentIntentId, amountCents, appointmentId) => {
     const response = await fetch(`${baseUrl}/v1/refunds`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', ...correlationHeaders() },
       body: JSON.stringify({ paymentIntentId, amountCents, appointmentId }),
     }).catch(PAYMENTS_UNAVAILABLE);
     if (!response.ok) {
