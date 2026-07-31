@@ -48,11 +48,15 @@ Estas tallas son un supuesto de diseño para un sistema sin tráfico real medido
 
 ## 2. Unit economics
 
+**Actualizado en Fase 6** (ADR-017, ver §3.5): los totales incluyen el +20% de ingesta de logs por
+la línea EMF adicional por request. El delta es marginal ($0.14-$14.31 según escenario) y no cambia
+ninguna conclusión de esta sección.
+
 | Escenario | Total mensual | Costo/clínica/mes | Citas/mes | Costo/cita |
 |---|---|---|---|---|
-| 10 clínicas | $221.90 | $221.90 / 10 = **$22.19** | 12,000 | $221.90 / 12,000 = **$0.0185** |
-| 100 clínicas | $641.05 | $641.05 / 100 = **$6.41** | 120,000 | $641.05 / 120,000 = **$0.0053** |
-| 1000 clínicas | $1,838.84 | $1,838.84 / 1000 = **$1.84** | 1,200,000 | $1,838.84 / 1,200,000 = **$0.0015** |
+| 10 clínicas | $222.04 | $222.04 / 10 = **$22.20** | 12,000 | $222.04 / 12,000 = **$0.0185** |
+| 100 clínicas | $642.49 | $642.49 / 100 = **$6.42** | 120,000 | $642.49 / 120,000 = **$0.0054** |
+| 1000 clínicas | $1,853.15 | $1,853.15 / 1000 = **$1.85** | 1,200,000 | $1,853.15 / 1,200,000 = **$0.0015** |
 
 El costo por clínica cae ~12x entre 10 y 1000 clínicas — la infraestructura compartida (RDS, Fargate, NAT, ALB, WAF, Secrets Manager) se amortiza sobre más clínicas sin crecer proporcionalmente, validando el argumento de "costo marginal por clínica ≈0" de ADR-005.
 
@@ -108,15 +112,58 @@ Adjuntos futuros: **$0** en los tres escenarios (0 MB/paciente, confirmado como 
 
 ### 3.5 CloudWatch (logs, métricas, dashboards)
 
-Fórmula de logs: `requests/día × clínicas × 30 días × 3 servicios tocados/request × 5 líneas de log/servicio × 300 bytes/línea` → GB ingeridos/mes × $0.50/GB. Storage asumido igual al volumen ingerido del mes (retención corta) × $0.03/GB-mes.
+**Actualizado en Fase 6 (ADR-017)** — dos cambios sobre la versión original de esta sección:
+1. La línea EMF adicional por request (métricas RED, `packages/observability/src/emf.ts`) suma
+   ~20% al volumen de logs ingeridos — antes esta sección solo contaba las líneas de log
+   "normales" de la aplicación.
+2. El conteo de métricas custom pasa de 60 (supuesto de diseño de Fase 1) a **57**, la cifra real
+   tras implementar el wiring (3 métricas RED × 6 procesos × 3 entornos = 54, + 1 métrica de
+   seguridad sin dimensiones × 3 entornos = 3 — ver ADR-017 sección "Aritmética"). La tabla de abajo
+   sigue usando $0.30/métrica × 60 como cota superior conservadora (el real es ~5% más barato);
+   no vale la pena recalcular las 3 filas por una diferencia de $0.90/mes.
 
-| Escenario | Requests/mes (todas) | Líneas de log/mes | GB ingeridos | Costo ingesta | Costo storage | Métricas custom (fijo) | Dashboards (fijo) | Total CloudWatch |
+Fórmula de logs: `requests/día × clínicas × 30 días × 3 servicios tocados/request × 5 líneas de log/servicio × 300 bytes/línea` → GB ingeridos/mes × $0.50/GB × 1.2 (línea EMF adicional). Storage asumido igual al volumen ingerido del mes (retención corta) × $0.03/GB-mes.
+
+| Escenario | Requests/mes (todas) | Líneas de log/mes (×1.2 por EMF) | GB ingeridos | Costo ingesta | Costo storage | Métricas custom (fijo, 60 como cota superior) | Dashboards (fijo) | Total CloudWatch |
 |---|---|---|---|---|---|---|---|---|
-| 10 clínicas | 300,000 | 4,500,000 | 1.35 GB | $0.675 | $0.041 | $18.00 (60 métricas × $0.30) | $0.00 (3 dashboards, dentro de franquicia gratis) | **$18.72** |
-| 100 clínicas | 3,000,000 | 45,000,000 | 13.5 GB | $6.75 | $0.405 | $18.00 | $0.00 | **$25.15** |
-| 1000 clínicas | 30,000,000 | 450,000,000 | 135 GB | $67.50 | $4.05 | $18.00 | $0.00 | **$89.55** |
+| 10 clínicas | 300,000 | 5,400,000 | 1.62 GB | $0.81 | $0.049 | $18.00 (60 métricas × $0.30) | $0.00 (3 dashboards, dentro de franquicia gratis) | **$18.86** |
+| 100 clínicas | 3,000,000 | 54,000,000 | 16.2 GB | $8.10 | $0.486 | $18.00 | $0.00 | **$26.59** |
+| 1000 clínicas | 30,000,000 | 540,000,000 | 162 GB | $81.00 | $4.86 | $18.00 | $0.00 | **$103.86** |
 
-Este es el recurso donde efectivamente aparece "la sorpresa clásica" de logs — pero solo se materializa con fuerza a escala de 1000 clínicas ($67.50 de ingesta); a 10 clínicas es marginal ($0.68).
+Este es el recurso donde efectivamente aparece "la sorpresa clásica" de logs — pero solo se materializa con fuerza a escala de 1000 clínicas ($81.00 de ingesta); a 10 clínicas es marginal ($0.81).
+
+#### 3.5.1 X-Ray (trazas distribuidas, Fase 6)
+
+**NO VERIFICADO** — precio de X-Ray nunca confirmado contra el catálogo real de AWS
+(`docs/cost/precios-aws-consultados.md` no lo incluye entre los 11 servicios verificados de Fase
+1). AWS documenta $5.00 por millón de trazas registradas + $0.50 por millón de trazas recuperadas/
+escaneadas (más allá de la franquicia gratuita de 100,000 trazas/mes), pero esa cifra no pasó por
+el mismo proceso de verificación que el resto de este documento — tratar como referencia, no como
+número comprometido. Con sampling `fixed_target=1, rate=1` en dev/staging (traza el 100%, tráfico
+bajo) y `fixed_target=1, rate=0.05` en prod (`infra/config/environments.ts`), el volumen de trazas
+en el escenario de 10 clínicas (300,000 requests/mes, prod) sería ~15,750 trazas/mes — dentro de
+la franquicia gratuita citada, sin costo. A 1000 clínicas (30,000,000 requests/mes) serían
+~1,500,750 trazas/mes, con un costo aproximado de referencia de ~$7/mes si la tarifa citada arriba
+es correcta — de nuevo, **NO VERIFICADO**.
+
+#### 3.5.2 CloudWatch GetMetricData (dashboard ejecutivo, Fase 6)
+
+**NO VERIFICADO** — mismo motivo que X-Ray. El endpoint `GET /v1/platform/metrics`
+(`services/appointments/src/lib/platform-metrics.ts`) cachea 60s en proceso, así que el volumen de
+llamadas a `GetMetricData` está acotado por visitas al dashboard ejecutivo, no por tráfico de la
+plataforma — 18 métricas solicitadas por llamada (3 × 6 servicios), como mucho una llamada cada 60
+segundos si el dashboard queda abierto permanentemente (1,440 llamadas/día × 18 métricas =
+25,920 métricas-consulta/día, ~777,600/mes). AWS cobra por métrica solicitada, no por llamada — la
+cifra de referencia (no verificada) es del orden de unos pocos dólares/mes en el uso esperado
+(un panel abierto ocasionalmente por un rol de plataforma, no tráfico constante).
+
+**Nota sobre región (ADR-018):** las tres tablas de esta sección (y el resto de §3) se calcularon
+contra precios de `mx-central-1`. La plataforma migró a `us-east-1` después de que este documento
+se escribió (ADR-018, 2026-07-31) — los números de esta sección **no fueron re-verificados** contra
+`us-east-1` como parte de esa migración (alcance explícito de ADR-018: "solo la región, no todo el
+cost model"). Los órdenes de magnitud relativos entre escenarios siguen siendo válidos como
+referencia; los montos absolutos requieren una nueva pasada de verificación de precios contra
+`us-east-1` antes de comprometerlos de nuevo en un Gate.
 
 ### 3.6 Cognito (1 pool compartido, ADR-011)
 
@@ -200,14 +247,14 @@ Fórmula: purga de retención (job diario, 128 MB, 5 seg, 30 invocaciones/mes) +
 | RDS | $74.15 | $308.70 | $944.90 |
 | SQS | $0.00 | $0.00 | $2.60 |
 | S3 | $0.01 | $0.02 | $0.15 |
-| CloudWatch | $18.72 | $25.15 | $89.55 |
+| CloudWatch | $18.86 | $26.59 | $103.86 |
 | Cognito | $0.00 | $0.00 | $0.00 |
 | ALB | $23.38 | $29.51 | $47.91 |
 | WAF | $11.18 | $12.80 | $29.00 |
 | NAT Gateway | $34.50 | $34.63 | $35.91 |
 | Secrets Manager | $3.20 | $3.20 | $3.20 |
 | Transferencia de datos | $0.00 | $0.00 | $4.50 |
-| **TOTAL** | **$221.90** | **$641.05** | **$1,838.84** |
+| **TOTAL** | **$222.04** | **$642.49** | **$1,853.15** |
 | **vs. presupuesto D6 ($150-300 a 10 clínicas)** | **Dentro del rango** | N/A (solo "techo a evaluar") | N/A |
 
 ---
@@ -250,7 +297,7 @@ En los tres escenarios, shared DB + RLS (ADR-005) es la opción más barata, y l
 
 ## 5. Sensibilidad
 
-Todos los escenarios de sensibilidad parten del escenario base de **10 clínicas ($221.90/mes)**, cambiando una sola variable a la vez.
+Todos los escenarios de sensibilidad parten del escenario base de **10 clínicas ($222.04/mes, actualizado en Fase 6 — ver §3.5)**, cambiando una sola variable a la vez. Los deltas de esta sección se calcularon sobre el total original ($221.90) antes de la actualización de Fase 6; la diferencia ($0.14) es irrelevante frente a la magnitud de estos escenarios (decenas a cientos de dólares) y no se repropagó fila por fila.
 
 ### 5.1 El tráfico se duplica (10 clínicas, misma talla de infraestructura)
 
@@ -294,11 +341,16 @@ Nuevo costo RDS: `0.034×730 + 20×0.242 = $24.82 + $4.84 = $29.66/instancia × 
 
 | Escenario | Total mensual | ¿Dentro de $150-300/mes? |
 |---|---|---|
-| **10 clínicas** | $221.90 | **Sí** — dentro del rango, con margen de ~$78/mes hasta el techo de $300 |
-| **100 clínicas** | $641.05 | **No** en términos absolutos, pero el plan maestro solo fija $150-300 como obligatorio a 10 clínicas y pide "evaluar techo" a 100 — el costo por clínica ($6.41) es 3.5x menor que a 10 clínicas, mostrando buena economía de escala |
-| **1000 clínicas** | $1,838.84 | **No** en términos absolutos — costo por clínica ($1.84) sigue bajando, validando el modelo shared-DB, pero el total requeriría negociar un presupuesto mayor si la plataforma llega a esa escala |
+| **10 clínicas** | $222.04 | **Sí** — dentro del rango, con margen de ~$78/mes hasta el techo de $300 |
+| **100 clínicas** | $642.49 | **No** en términos absolutos, pero el plan maestro solo fija $150-300 como obligatorio a 10 clínicas y pide "evaluar techo" a 100 — el costo por clínica ($6.42) es 3.5x menor que a 10 clínicas, mostrando buena economía de escala |
+| **1000 clínicas** | $1,853.15 | **No** en términos absolutos — costo por clínica ($1.85) sigue bajando, validando el modelo shared-DB, pero el total requeriría negociar un presupuesto mayor si la plataforma llega a esa escala |
 
 El escenario de referencia (10 clínicas) **cumple el Gate 1** ("el cost model esté dentro del presupuesto D6"). El margen de $78/mes hasta el techo es delgado: como muestra la sección de sensibilidad, un solo cambio de talla de RDS (a t4g.medium) ya rompe el presupuesto, y activar Multi-AZ por sí solo lo deja al límite. Cualquier decisión futura que toque la talla de RDS o la topología de Fargate debe re-verificarse contra este modelo antes de aplicarse.
+
+**Nota (ADR-018):** estos totales siguen calculados sobre precios de `mx-central-1` — la
+plataforma migró a `us-east-1` después de este documento (ver el aviso al final de §3.5). El
+Gate 1 se aprobó con las cifras de `mx-central-1`; una re-verificación completa contra `us-east-1`
+queda pendiente, fuera del alcance de la Fase 6.
 
 ---
 

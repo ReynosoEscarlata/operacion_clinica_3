@@ -117,16 +117,26 @@ Filter sobre logs estructurados**.
   - El conteo real de métricas custom emitidas tras el wiring de EMF, contra las 60 comprometidas.
   - El crecimiento de ingesta de CloudWatch Logs por la línea EMF adicional por request (+20%
     aprox., ver `cost-model.md` §3.5 actualizado).
-  - Disponibilidad y precio real de X-Ray en `mx-central-1` — **NO VERIFICADO**, el único riesgo
-    que podría reabrir la decisión 1 (`docs/cost/precios-aws-consultados.md` solo confirmó 11
-    servicios, X-Ray no es uno de ellos).
+  - Disponibilidad y precio real de X-Ray — **NO VERIFICADO** el precio exacto (nunca se confirmó
+    contra el catálogo de precios real, ver `docs/cost/precios-aws-consultados.md`); la
+    disponibilidad del servicio dejó de ser el riesgo que era cuando esta fase se diseñó (X-Ray es
+    un servicio maduro y bien soportado en `us-east-1`, la región vigente desde ADR-018 — el riesgo
+    original era específico de `mx-central-1`, una región opt-in).
   - La excepción de región (`us-east-1` para Budget/Cost Anomaly) frente a ADR-010 — los datos ahí
-    son metadatos de facturación de la cuenta AWS, no datos personales de pacientes.
+    son metadatos de facturación de la cuenta AWS, no datos personales de pacientes. **Nota
+    (ADR-018):** desde el cambio de región de toda la plataforma a `us-east-1`, este stack ya no es
+    una excepción real (coincide con la región del resto de la infra) — el pin explícito a
+    `us-east-1` en el código se mantiene por claridad y porque seguiría siendo necesario si la
+    plataforma volviera a `mx-central-1` en el futuro (Budgets/Cost Anomaly Detection no tienen
+    endpoint ahí).
   - La dependencia de Fase 5 para la redacción real de PII en logs — esta fase solo fija 3 reglas
     de emisión (nunca URL cruda, nunca query string, nunca body) y dos IDs opacos (`tenantId`,
     `requestId`), no implementa un redactor.
-  - El mapeo de cuenta de entrega de ELB por región (`region-info`) para ALB access logs a S3 en
-    `mx-central-1` — **NO VERIFICADO**, validado en la práctica con `cdk synth`.
+  - El mapeo de cuenta de entrega de ELB por región (`region-info`) para ALB access logs a S3 —
+    **Verificado** con `cdk synth` (Ola 4): la región vigente (`us-east-1`, post-ADR-018) usa el
+    mecanismo moderno de service principal (`logdelivery.elasticloadbalancing.amazonaws.com` +
+    `delivery.logs.amazonaws.com`) en vez de la tabla legacy de cuentas por región — sin
+    llamadas a AWS en tiempo de síntesis, sin gap.
 
 ## Referencias
 - `claude/PLAN-challenge-5-plataforma-para-todos.md`, Fase 6.
@@ -138,3 +148,16 @@ Filter sobre logs estructurados**.
 - `docs/security/threat-model.md`, amenaza #3 (IDOR por posesión de UUID — la respuesta 404 no
   cambia, solo se agrega logging de seguridad en paralelo).
 - `docs/backlog-deuda.md`, ítem 8 (gateway sin propagación de `request-id`, cerrado por esta fase).
+- `docs/adr/ADR-018-cambio-region-us-east-1.md` (cambio de región posterior a esta decisión, ver
+  Changelog).
+
+## Changelog
+
+- **2026-07-31 (Ola 4):** verificado con `cdk synth` que el mapeo de cuenta de entrega de ELB
+  access logs no tiene gap en la región vigente (ver "Cosas a monitorear"). No cambia la Decisión.
+- **2026-07-31 (post-ADR-018):** la plataforma completa migró de `mx-central-1` a `us-east-1`
+  (ADR-018, decidido después de esta fase). Actualizadas las notas de "Cosas a monitorear" sobre
+  disponibilidad de X-Ray y la excepción de región del stack de costos para reflejar que ambas
+  dejaron de ser un riesgo específico de `mx-central-1` — no cambia la Decisión de esta ADR (los 5
+  componentes elegidos siguen siendo correctos independientemente de la región). El precio exacto
+  de X-Ray y de `GetMetricData` sigue **NO VERIFICADO** contra el catálogo real de AWS.

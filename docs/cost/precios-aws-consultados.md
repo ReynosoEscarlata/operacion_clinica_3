@@ -210,6 +210,20 @@ Idéntico en ambas regiones.
 
 ---
 
+## 12. X-Ray y CloudWatch GetMetricData (Fase 6, ADR-017) — NO VERIFICADO
+
+A diferencia de los 11 servicios de arriba, estos dos **no se consultaron contra la AWS Price
+List Bulk API** en esta sesión — no hay archivo JSON descargado ni URL de fuente que citar. Las
+cifras usadas como referencia en `docs/cost/cost-model.md` §3.5.1/§3.5.2 ($5.00/millón de trazas
+registradas + $0.50/millón recuperadas para X-Ray; sin cifra concreta para `GetMetricData`, cobrado
+por métrica solicitada) provienen de memoria/documentación general de AWS, **no de una consulta
+verificada como el resto de este documento**. Antes de comprometer estos números en un Gate,
+repetir el mismo proceso que produjo las secciones 1-11: descargar el offer file de
+`AWSXRay`/`AmazonCloudWatch` (el de `GetMetricData` específicamente, no solo el de logs/métricas
+ya cubierto en la sección 6) para la región vigente y extraer el precio real.
+
+---
+
 ## Preguntas abiertas para el humano
 
 1. **WAF — discrepancia description vs. pricePerUnit en mx-central-1.** Los campos de texto ("$50 per Month", "$10 per Month", "$100 per Month") no coinciden con el campo numérico real de facturación (`pricePerUnit`: $5, $1, $10). Se reportó el valor de `pricePerUnit` por ser el campo que efectivamente se factura, pero **se recomienda confirmar manualmente en la AWS Pricing Calculator con región México (Central) seleccionada** antes de usar esta cifra en un presupuesto comprometido — si resultara que el precio real es 10x mayor, cambia significativamente el costo de WAF en el diseño multi-tenant.
@@ -223,3 +237,15 @@ Idéntico en ambas regiones.
 5. **Disponibilidad "operativa" vs. "pricing publicado".** Los 11 servicios tienen archivos de precios propios para mx-central-1, lo cual es fuerte evidencia de disponibilidad, y para Cognito se confirmó explícitamente con el anuncio de lanzamiento regional de julio 2025. Para WAF, ALB, SQS, S3, Lambda, RDS, Fargate/ECS, CloudWatch, NAT Gateway y Secrets Manager no se buscó un anuncio de lanzamiento regional dedicado (son servicios "core" que típicamente acompañan cada región nueva desde el día uno). **¿Se acepta esta inferencia (pricing publicado = servicio disponible) o se requiere que el humano confirme cada uno manualmente en la consola de AWS antes de congelar la arquitectura?**
 
 6. **¿Aceptamos que algún componente viva en otra región que los datos?** No se encontró ningún caso en esta investigación donde mx-central-1 careciera de un servicio de los 11 solicitados — por lo tanto, con la información disponible, **no habría necesidad de usar us-east-1 como región operativa real** para ningún componente de este stack. Esto es una buena noticia para la decisión de "todo en mx-central-1", pero como se indica en el punto 5, vale la pena una confirmación operativa final antes de cerrar el diseño de Fase 1.
+
+   **Resuelto (ADR-018, 2026-07-31):** la "confirmación operativa final" que este punto pedía
+   efectivamente reveló el problema que aquí se consideraba poco probable — `mx-central-1` es una
+   región opt-in no habilitada por default en la cuenta sandbox real usada para el primer deploy
+   de prueba. La plataforma migró completa a `us-east-1`. Todas las cifras de este documento
+   (secciones 1-11) siguen siendo válidas como **precios de `mx-central-1`**, pero ya no
+   representan la región operativa real — pendiente una nueva pasada de verificación contra
+   `us-east-1` (alcance explícito de ADR-018: no se hizo como parte de ese cambio).
+
+7. **X-Ray y `GetMetricData` (Fase 6) nunca se verificaron.** Ver sección 12 arriba — las cifras
+   usadas en `cost-model.md` §3.5.1/§3.5.2 son de memoria, no de una consulta a la Price List API
+   como el resto de este documento. Pendiente antes de comprometerlas en un Gate.

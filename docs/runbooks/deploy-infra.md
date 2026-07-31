@@ -1,8 +1,12 @@
-# Runbook — Desplegar/destruir la infraestructura (Fase 2)
+# Runbook — Desplegar/destruir la infraestructura (Fase 2, actualizado Fase 6)
 
-**Alcance:** los 9 stacks de CDK en `infra/` (`Foundation`, `Network`, `Database`, `Messaging`,
-`Storage`, `Identity`, `Compute`, `Edge`, `Observability`). Región `mx-central-1` (ADR-010), una
-sola cuenta AWS con 3 entornos lógicos (ADR-009).
+**Alcance:** los 10 stacks de CDK en `infra/` (`Foundation`, `Network`, `Database`, `Messaging`,
+`Storage`, `Identity`, `Compute`, `Edge`, `Observability`, `Cost` — este último agregado en Fase 6,
+ADR-017). Región `us-east-1` (ADR-018, reemplaza ADR-010/`mx-central-1`), una sola cuenta AWS con 3
+entornos lógicos (ADR-009). El stack `Cost` está pinneado explícitamente a `us-east-1` en el código
+(`infra/lib/build-app.ts`, requisito de Budgets/Cost Anomaly Detection) — desde ADR-018 esto
+coincide con la región del resto del proyecto, así que **ya no hace falta bootstrap en una segunda
+región** (antes de ADR-018, con el resto en `mx-central-1`, sí habría hecho falta).
 
 **Nunca ejecutado por Claude Code** — este runbook es para el humano. Ver guardrails de
 `CLAUDE.md`: ningún despliegue real se hizo durante la Fase 2.
@@ -25,7 +29,7 @@ sola cuenta AWS con 3 entornos lógicos (ADR-009).
    ```
 2. Confirma que el bootstrap de CDK ya corrió en esa cuenta/región (una sola vez por cuenta):
    ```bash
-   npx cdk bootstrap aws://<ACCOUNT_ID>/mx-central-1
+   npx cdk bootstrap aws://<ACCOUNT_ID>/us-east-1
    ```
 3. Exporta la variable de cuenta correspondiente al entorno (ver `config/environments.ts`):
    ```bash
@@ -46,22 +50,29 @@ sola cuenta AWS con 3 entornos lógicos (ADR-009).
 ```bash
 cd infra
 npm install
-npx cdk bootstrap aws://$CDK_DEV_ACCOUNT/mx-central-1
+npx cdk bootstrap aws://$CDK_DEV_ACCOUNT/us-east-1
 npx cdk deploy --all -c env=dev --require-approval broadening
 ```
 
 Orden de despliegue: CDK resuelve automáticamente el orden por las dependencias entre stacks
-(Foundation y Network primero, Edge/Observability al final).
+(Foundation y Network primero, Edge/Observability al final; `Cost` no depende de ningún otro stack
+propio, así que puede desplegarse en cualquier momento del proceso).
 
 **Después del primer deploy:**
-1. Suscribe tu email a los topics de alarma (no se hardcodea en el código):
+1. Suscribe tu email a los 3 topics de alarma (no se hardcodea ningún correo en el código —
+   audiencias distintas, ver `infra/README.md`):
    ```bash
-   aws sns subscribe --topic-arn <arn-de-clinica-dev-budget-alerts> --protocol email --notification-endpoint <tu-email>
    aws sns subscribe --topic-arn <arn-de-clinica-dev-operational-alerts> --protocol email --notification-endpoint <tu-email>
+   aws sns subscribe --topic-arn <arn-de-clinica-dev-security-alerts> --protocol email --notification-endpoint <tu-email>
+   aws sns subscribe --topic-arn <arn-de-clinica-dev-cost-alerts> --protocol email --notification-endpoint <tu-email>
    ```
-2. Publica las imágenes reales a los 6 repositorios ECR creados (`docker build` + `docker push`
+2. Activa como Cost Allocation Tag en Billing los tags `Environment`, `ClinicService` y
+   `Component` (Fase 6, paso manual no expresable en CloudFormation) — sin esto, el Budget del
+   stack `Cost` y el reporte de costo por tenant (`docs/cost/reporte-costo-por-tenant.md`) no ven
+   ningún gasto filtrado por esos tags.
+3. Publica las imágenes reales a los 6 repositorios ECR creados (`docker build` + `docker push`
    por servicio) — las task definitions apuntan a `:latest`, que no existe hasta este paso.
-3. Verifica el dashboard: `clinica-dev-plataforma` en CloudWatch.
+4. Verifica el dashboard: `clinica-dev-plataforma` en CloudWatch (widgets RED vía EMF, Fase 6).
 
 ### Deploy incremental
 

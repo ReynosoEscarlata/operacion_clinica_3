@@ -4,6 +4,16 @@ Referencia: [RFC-001-bounded-contexts.md](../../RFC-001-bounded-contexts.md),
 [ADR-001-sync-vs-async.md](../../ADR-001-sync-vs-async.md),
 [ADR-002-transacciones-distribuidas.md](../../ADR-002-transacciones-distribuidas.md).
 
+> **Nota de vigencia (Fase 6, ADR-017):** este diagrama predata varios cambios de arquitectura del
+> Challenge 5 y **no está actualizado** — el broker de eventos ya no es Redis Streams (migrado a
+> SNS/SQS/EventBridge Scheduler, ADR-014), y no refleja tenancy (ADR-005/006), RBAC (RFC-004) ni
+> observabilidad (ADR-017). Actualización puntual de esta fase: **cada uno de los 6 contenedores
+> (gateway + 5 servicios) corre con un sidecar `xray-daemon`** (`aws-xray-daemon`, ECS Fargate,
+> `essential: false` — si muere, el contenedor principal sigue sirviendo tráfico) que recibe
+> trazas por UDP y las reenvía a AWS X-Ray; no se agregó al diagrama Mermaid de abajo porque una
+> actualización completa y consistente de todo el diagrama (broker, tenancy, RBAC) está fuera del
+> alcance de esta fase — queda como deuda documentada, no como omisión silenciosa.
+
 Cada flecha está etiquetada explícitamente como **HTTP** (síncrono) o **evento** (asíncrono, vía
 Redis Streams). Esta etiqueta no es decorativa: es la regla de ADR-001 aplicada visualmente.
 

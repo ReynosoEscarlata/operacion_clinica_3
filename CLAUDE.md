@@ -479,10 +479,10 @@ Peligro    → fondo white, borde danger, texto danger, hover red-50
 
 ## Guardrails — Challenge 5 ("Plataforma para todos", SaaS multi-tenant en AWS)
 
-Plan maestro: `claude/PLAN-challenge-5-plataforma-para-todos.md`. Estado: Fases 0–5 completadas
-(inventario, diseño/RFC/ADR, fundación IaC, tenancy, RBAC, compliance LFPDPPP); Fase 6
-(observabilidad) en progreso; Fase 7 (DR) parcial (ADR-015 aceptado, game days pendientes). Ver
-"Mapa de fases" y "Estado de ejecución — Fase 5" en el plan maestro para el detalle por fase.
+Plan maestro: `claude/PLAN-challenge-5-plataforma-para-todos.md`. Estado: Fases 0–6 completadas
+(inventario, diseño/RFC/ADR, fundación IaC, tenancy, RBAC, compliance LFPDPPP, observabilidad y
+costos); Fase 7 (DR) parcial (ADR-015 aceptado, game days pendientes). Ver "Mapa de fases" y
+"Estado de ejecución — Fase 6" en el plan maestro para el detalle por fase.
 
 - NUNCA tomes decisiones de arquitectura marcadas como "PENDIENTE DE DECISIÓN HUMANA".
   Si una tarea las requiere, PARA y pregunta.

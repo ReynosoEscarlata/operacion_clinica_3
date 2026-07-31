@@ -29,10 +29,12 @@ en ese caso):
 
 ```
 infra/
-  bin/infra.ts                 # entry point: -c env=dev|staging|prod (default dev)
-  lib/stacks/                  # 9 stacks: foundation, network, database, messaging, storage,
-                                # identity, compute, edge, observability
-  lib/constructs/               # ClinicService, QueueWithDlq, SecureBucket (reutilizables)
+  bin/infra.ts                 # entry point delgado -- llama a lib/build-app.ts
+  lib/build-app.ts             # wiring real de los 10 stacks (Fase 6: reusado también por
+                                # infra/test/alarmas-tienen-runbook.test.ts)
+  lib/stacks/                  # 10 stacks: foundation, network, database, messaging, storage,
+                                # identity, compute, edge, observability, cost (Fase 6, us-east-1)
+  lib/constructs/               # ClinicService, QueueWithDlq, SecureBucket, AlarmWithRunbook (Fase 6)
   config/environments.ts        # tallas/flags por entorno, sin secretos
 ```
 
@@ -51,8 +53,8 @@ infra/
 |---|---|
 | `npm run typecheck` | `tsc --noEmit` sobre `bin/`, `lib/`, `config/` |
 | `npm run lint` | ESLint |
-| `npx cdk synth -c env=dev` | Sintetiza las 9 stacks del entorno `dev` a `cdk.out/` |
-| `npx cdk list -c env=<entorno>` | Lista las 9 stacks del entorno |
+| `npx cdk synth -c env=dev` | Sintetiza las 10 stacks del entorno `dev` a `cdk.out/` |
+| `npx cdk list -c env=<entorno>` | Lista las 10 stacks del entorno |
 | `npx cdk diff -c env=<entorno>` | Diff contra lo desplegado (requiere credenciales reales) |
 | `npx cdk deploy --all -c env=<entorno>` | **Deploy real — NO ejecutado en esta fase** |
 | `npx cdk destroy --all -c env=dev` | **Destroy real — NO ejecutado en esta fase** |
@@ -71,7 +73,7 @@ bloqueante salvo que se agregue `--validation=false` al comando. Este proyecto v
 npx cdk synth -c env=dev --validation=false
 ```
 
-Los 9 templates se generan correctamente en los 3 entornos. El linter reporta además, como
+Los 10 templates se generan correctamente en los 3 entornos. El linter reporta además, como
 **warnings informativos** (no bloqueantes, y no relacionados con el flag anterior):
 
 - Advertencia de "no hardcodear AZs" — es intencional: se hardcodea `${region}a/b/c` en
@@ -134,8 +136,18 @@ nativamente en `us-east-1`, que ahora es la región del proyecto — el pin expl
 4. La Fase 3 necesita decidir cómo se compone `DATABASE_URL` en cada servicio a partir de las
    variables discretas (`DB_HOST`/`DB_PORT`/`DB_NAME`/`DB_USER`/`DB_PASSWORD`) — ¿en el propio
    `env.ts` de cada servicio, o en un script de bootstrap antes de arrancar Prisma?
-5. Suscripción de email a los topics de alarma (`budget-alerts`, `operational-alerts`) — no se
-   hardcodeó ningún correo en el código; se suscribe manualmente post-deploy:
+5. Suscripción de email a los topics de alarma — no se hardcodeó ningún correo en el código; se
+   suscribe manualmente post-deploy. Tres topics con audiencias distintas (Fase 6, ADR-017):
+   `clinica-<env>-operational-alerts` (guardia técnica: CPU, 5xx, latencia, DLQ, RDS — región del
+   proyecto), `clinica-<env>-security-alerts` (acceso cross-tenant confirmado, posible incidente
+   LFPDPPP — región del proyecto), `clinica-<env>-cost-alerts` (presupuesto + Cost Anomaly
+   Detection — **en `us-east-1`**, el stack `Cost` está pinneado ahí incluso si el resto del
+   proyecto usara otra región en el futuro):
    ```bash
-   aws sns subscribe --topic-arn <arn-del-topic> --protocol email --notification-endpoint <tu-email>
+   aws sns subscribe --topic-arn <arn-operational-o-security> --protocol email --notification-endpoint <tu-email>
+   aws sns subscribe --region us-east-1 --topic-arn <arn-cost> --protocol email --notification-endpoint <tu-email>
    ```
+6. Activar como Cost Allocation Tag en Billing los tags `Environment`, `ClinicService` y
+   `Component` (Fase 6) — paso manual no expresable en CloudFormation; sin esto, el Budget y el
+   reporte de costo por tenant (`docs/cost/reporte-costo-por-tenant.md`) no ven ningún gasto
+   filtrado por esos tags aunque los recursos ya estén etiquetados.
